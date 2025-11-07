@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from typing import Callable
 
 class BinaryLinear(nn.Module):
     """
@@ -117,3 +117,129 @@ class BEMB(nn.Module):
         # ---- Combine ---- #
         tk_pos_emb = tk_emb + pos_emb                              # (B, L, emb_dim)
         return tk_pos_emb
+
+
+
+class BNCVL(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, activation: Callable = nn.ReLU()):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+
+        # 32-bit float convolution weights and bias
+        self.weight = nn.Parameter(
+            torch.randn(out_channels, in_channels, kernel_size, kernel_size)
+        )
+        self.bias = nn.Parameter(torch.zeros(out_channels))
+
+        self.activation = activation
+
+    def no_grad(self, x):
+        """Stops gradient flow (Straight-Through Estimator)."""
+        return x.detach()
+    
+    def quantize(self, x):
+        """
+        Binary quantization based on the mean of x.
+        1 if x > mean(x), else 0.
+        """
+        threshold = x.mean()
+        return (x > threshold).float()
+    
+    def normalize(self, z):
+        """Normalize each feature map in a sample."""
+        mean = z.mean(dim=(1, 2, 3), keepdim=True)
+        std = z.std(dim=(1, 2, 3), keepdim=True) + 1e-8
+        return (z - mean) / std
+
+    def forward(self, x):
+        if self.training:
+            # Quantization during training (STE approximation)
+            w_q = self.weight + self.no_grad(self.quantize(self.weight) - self.weight)
+            b_q = self.bias + self.no_grad(self.quantize(self.bias) - self.bias)
+        else:
+            # Quantization during inference
+            w_q = self.quantize(self.weight)
+            b_q = self.quantize(self.bias)
+
+        # Perform convolution with quantized weights
+        z = F.conv2d(x, w_q, b_q, stride=1, padding=self.kernel_size // 2)
+
+        # Normalize and activate
+        z = self.normalize(z)
+        return self.activation(z)
+
+
+class CVNBlocks(nn.Module):
+    def __init__(self, layers_config):
+        """
+        a block of multiple BNCVL layers + one maxpool2d layer
+
+        layers_config: list of dicts with parameters for each sub-block
+        Example:
+            [
+                {"in_channels": 3, "out_channels": 16},
+                {"in_channels": 16, "out_channels": 32},
+                {"in_channels": 32, "out_channels": 64}
+            ]
+        """
+        super().__init__()
+        blocks = []
+        for cfg in layers_config:
+            block = BNCVL(**cfg)
+            blocks.append(block)
+        blocks.append(nn.MaxPool2d(kernel_size=2, stride=2))
+        self.sequence = nn.Sequential(*blocks)
+
+    def forward(self, x):
+        return self.sequence(x)
+
+
+class BCVNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        # block 1
+        self.block1 = CVNBlocks()
+
+        # block 2
+        self.block2 = CVNBlocks()
+
+        # block 3
+        self.block3 = CVNBlocks()
+
+        # block 4
+        self.block4 = CVNBlocks()
+
+        # block 5
+        self.bncvl9 = BNCVL()
+        self.bncvl10 = BNCVL()
+        self.GAP = nn.AdaptiveAvgPool2d()
+
+        # block 6
+        self.bnfcl1 = BinaryLinear()
+        self.bnfcl2 = BinaryLinear()
+        self.finallayer = BinaryLinear()
+    
+    def forward(self, x):
+        # --- feature extraction ---
+        x = self.block1(x)
+        x = self.block2(x)
+        x = self.block3(x)
+        x = self.block4(x)
+
+        # --- final conv + normalization + activation ---
+        x = self.bncvl9(x)
+        x = self.bncvl10(x)
+
+        # --- global average pooling ---
+        x = self.GAP(x)          # shape: [batch, channels, 1, 1]
+        x = torch.flatten(x, 1)  # shape: [batch, channels]
+
+        # --- fully connected binary layers ---
+        x = self.bnfcl1(x)
+        x = self.bnfcl2(x)
+        x = self.finallayer(x)
+
+        return x
