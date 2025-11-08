@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Callable
+from typing import Callable, Optional
 
 class BinaryLinear(nn.Module):
     """
@@ -39,6 +39,8 @@ class BinaryLinear(nn.Module):
             return F.relu
         if name == "gelu":
             return F.gelu
+        if name == "softmax":
+            return lambda x: F.softmax(x, dim=-1)
         raise ValueError(f"Unknown activation {name}")
 
     @staticmethod
@@ -121,7 +123,7 @@ class BEMB(nn.Module):
 
 
 class BNCVL(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, activation: Callable = nn.ReLU()):
+    def __init__(self, in_channels, out_channels, kernel_size, activation: str = None, padding: str | None = "same" ):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -133,7 +135,8 @@ class BNCVL(nn.Module):
         )
         self.bias = nn.Parameter(torch.zeros(out_channels))
 
-        self.activation = activation
+        self.activation = self._get_act(activation)
+        self.padding = 0 if padding is None else padding
 
     def no_grad(self, x):
         """Stops gradient flow (Straight-Through Estimator)."""
@@ -146,6 +149,16 @@ class BNCVL(nn.Module):
         """
         threshold = x.mean()
         return (x > threshold).float()
+    
+    @staticmethod
+    def _get_act(name):
+        if name is None or name == "linear":
+            return lambda x: x
+        if name == "relu":
+            return F.relu
+        if name == "gelu":
+            return F.gelu
+        raise ValueError(f"Unknown activation {name}")
     
     def normalize(self, z):
         """Normalize each feature map in a sample."""
@@ -164,7 +177,7 @@ class BNCVL(nn.Module):
             b_q = self.quantize(self.bias)
 
         # Perform convolution with quantized weights
-        z = F.conv2d(x, w_q, b_q, stride=1, padding=self.kernel_size // 2)
+        z = F.conv2d(x, w_q, b_q, stride=1, padding=self.padding)
 
         # Normalize and activate
         z = self.normalize(z)
@@ -179,9 +192,8 @@ class CVNBlocks(nn.Module):
         layers_config: list of dicts with parameters for each sub-block
         Example:
             [
-                {"in_channels": 3, "out_channels": 16},
-                {"in_channels": 16, "out_channels": 32},
-                {"in_channels": 32, "out_channels": 64}
+                {"in_channels": 32, "out_channels": 64, "kernel_size": 2, "activation": "relu", "padding": "same"},
+                {"in_channels": 64, "out_channels": 64, "kernel_size": 2, "activation": "relu", "padding": "same"}
             ]
         """
         super().__init__()
@@ -197,30 +209,54 @@ class CVNBlocks(nn.Module):
 
 
 class BCVNN(nn.Module):
-    def __init__(self):
+    def __init__(self, image_channels=3, filter_dimension=3):
+        """
+        image_channels: number of input channels (3 for RGB)
+        filter_dimension: kernel size for all convolution layers
+        """
         super().__init__()
 
         # block 1
-        self.block1 = CVNBlocks()
+        self.block1 = CVNBlocks(
+            [
+                {"in_channels": image_channels, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+                {"in_channels": 32, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+            ]
+        )
 
         # block 2
-        self.block2 = CVNBlocks()
+        self.block2 = CVNBlocks(
+            [
+                {"in_channels": 32, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+                {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+            ]
+        )
 
         # block 3
-        self.block3 = CVNBlocks()
+        self.block3 = CVNBlocks(
+            [
+                {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+                {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+            ]
+        )
 
         # block 4
-        self.block4 = CVNBlocks()
+        self.block4 = CVNBlocks(
+            [
+                {"in_channels": 64, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+                {"in_channels": 128, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+            ]
+        )
 
         # block 5
-        self.bncvl9 = BNCVL()
-        self.bncvl10 = BNCVL()
-        self.GAP = nn.AdaptiveAvgPool2d()
+        self.bncvl9 = BNCVL(in_channels=128, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
+        self.bncvl10 = BNCVL(in_channels=256, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
+        self.GAP = nn.AdaptiveAvgPool2d((1, 1))
 
         # block 6
-        self.bnfcl1 = BinaryLinear()
-        self.bnfcl2 = BinaryLinear()
-        self.finallayer = BinaryLinear()
+        self.bnfcl1 = BinaryLinear(in_features=256, out_features=256, activation="relu")
+        self.bnfcl2 = BinaryLinear(in_features=256, out_features=256, activation="relu")
+        self.finallayer = BinaryLinear(in_features=256, out_features=101, activation="softmax")
     
     def forward(self, x):
         # --- feature extraction ---
