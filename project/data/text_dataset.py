@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader, IterableDataset
 from transformers import AutoTokenizer
 
 dataset = load_dataset("allenai/c4", "en", split="train", streaming=True)
+val_dataset = load_dataset("allenai/c4", "en", split="validation", streaming=True)
 tokenizer_name = "gpt2"           
 tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
 tokenizer.pad_token = tokenizer.eos_token   
@@ -59,6 +60,7 @@ def collate_fn(batch):
 def get_loader(batch_size, max_len, num_workers, prefetch_factor):
     
     block_stream = BlockDataset(dataset, tokenizer, max_len)
+    val_block_stream = BlockDataset(val_dataset, tokenizer, max_len)
     
     dataloader = DataLoader(
         block_stream,                 # IterableDataset
@@ -67,7 +69,15 @@ def get_loader(batch_size, max_len, num_workers, prefetch_factor):
         num_workers=num_workers,            
         pin_memory=True,
         prefetch_factor=prefetch_factor 
+    )    
+    val_dataloader = DataLoader(
+        val_block_stream,                 # IterableDataset
+        batch_size=batch_size,    
+        collate_fn=collate_fn,
+        num_workers=num_workers,            
+        pin_memory=True,
+        prefetch_factor=prefetch_factor 
     )
 
-    return dataloader
+    return dataloader, val_dataloader
     

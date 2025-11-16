@@ -151,7 +151,7 @@ if compile:
     unoptimized_model = model
     model = torch.compile(model)
 
-dataloader = text_dataset.get_loader(
+dataloader, val_dataloader = text_dataset.get_loader(
     batch_size   = batch_size, 
     max_len      = block_size, 
     num_workers  = 8,
@@ -262,7 +262,7 @@ while iter_num < max_iters:
             if iter_num % eval_interval == 0 or iter_num == max_iters:
                 
                 t0 = time.time()
-                val_loss = estimate_loss(model, dataloader)
+                val_loss = estimate_loss(model, val_dataloader)
                 print(f"\nstep {iter_num}: val loss {val_loss:.4f}, "
                       f"time {time.time()-t0:.1f}s\n")
     
