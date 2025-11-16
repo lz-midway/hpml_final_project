@@ -56,7 +56,7 @@ def collate_fn(batch):
     return input_ids, labels
 
 
-def get_loader(batch_size, max_len, num_workers):
+def get_loader(batch_size, max_len, num_workers, prefetch_factor):
     
     block_stream = BlockDataset(dataset, tokenizer, max_len)
     
@@ -66,7 +66,9 @@ def get_loader(batch_size, max_len, num_workers):
         collate_fn=collate_fn,
         num_workers=num_workers,            
         pin_memory=True,
+        prefetch_factor=prefetch_factor 
     )
+    # added prefetch_factor
 
     return dataloader
     

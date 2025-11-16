@@ -7,10 +7,17 @@ from pathlib import Path
 from pprint import pprint
 from dataclasses import asdict    
 from contextlib import nullcontext
+from transformer_engine.pytorch import fp8_autocast
+import transformer_engine.pytorch as te
 
 from models import Transformer, TransformerConfig
 from data import text_dataset
 import binary_layers
+
+
+torch.backends.cuda.enable_flash_sdp(True)
+torch.backends.cuda.enable_mem_efficient_sdp(True)
+torch.backends.cuda.enable_math_sdp(False)
 
 
 learning_rate = 6e-4 # max learning rate
@@ -61,14 +68,14 @@ log_interval = 1
 eval_iters = 200
 always_save_checkpoint = True 
 
-gradient_accumulation_steps = 5 * 8
-batch_size = 12 
+gradient_accumulation_steps = 4 * 8
+batch_size = 16 
 block_size = 1024
 
 model_config = TransformerConfig(
     n_layer     = 12,
-    n_head      = 12,
-    n_embd      = 768,
+    n_head      = 16,
+    n_embd      = 1024,
     dropout     = 0.0,
     vocab_size  = 50304,
     bias        = False,
@@ -76,6 +83,7 @@ model_config = TransformerConfig(
     
     mlp_proj    = binary_layers.Linear,
     qkv_proj    = binary_layers.Linear,
+    c_proj      = nn.Linear,
 )
 
 model = Transformer(model_config)
@@ -119,6 +127,10 @@ run_config = {
         "vocab_size": model_config.vocab_size,
         "bias"      : model_config.bias,
         "max_len"   : model_config.max_len,
+        "mlp_proj"  : model_config.mlp_proj,
+        "qkv_proj"  : model_config.qkv_proj,
+        "c_proj"    : model_config.c_proj,
+        "max_len"   : model_config.max_len,
     },
 }
 
@@ -142,7 +154,8 @@ if compile:
 dataloader = text_dataset.get_loader(
     batch_size   = batch_size, 
     max_len      = block_size, 
-    num_workers  = 0
+    num_workers  = 8,
+    prefetch_factor = 16,
 )
     
 optimizer = torch.optim.AdamW(lr = learning_rate, weight_decay = weight_decay, betas=(beta1, beta2), params = model.parameters())
@@ -171,9 +184,10 @@ def estimate_loss(model, dataloader, iters=eval_iters):
             break
         idx = idx.to(device)
         labels = labels.to(device)
-        with ctx:
-            logits = model(idx)  # (B, T, vocab)
-            loss = loss_fn(logits, labels)
+        with fp8_autocast():
+            with ctx:
+                logits = model(idx)  # (B, T, vocab)
+                loss = loss_fn(logits, labels)
         losses.append(loss.item())
     model.train()
     return sum(losses) / len(losses)
@@ -197,6 +211,7 @@ iter_start = time.time()
 
 for i in range(10):
     print(model.generate("Hello, I am an LLM", dataloader.dataset.tok))
+model.train()
 
 while iter_num < max_iters:
     # fetch a batch
@@ -211,9 +226,10 @@ while iter_num < max_iters:
                 param_group["lr"] = get_lr(iter_num - 1)
 
         # ---------------- forward ----------------
-        with ctx:
-            logits = model(idx)  # (B, T, vocab)
-            loss = loss_fn(logits, labels) / gradient_accumulation_steps
+        with fp8_autocast():
+            with ctx:
+                logits = model(idx)  # (B, T, vocab)
+                loss = loss_fn(logits, labels) / gradient_accumulation_steps
 
         # ---------------- backward ----------------
         scaler.scale(loss).backward()
@@ -231,6 +247,8 @@ while iter_num < max_iters:
             optimizer.zero_grad(set_to_none=True)
             iter_num += 1
             micro_batch = 0
+
+            model.update_cache()
 
         # ---------------- logging ----------------
             if iter_num % log_interval == 0:
@@ -261,7 +279,7 @@ while iter_num < max_iters:
                         "val_loss": val_loss,
                         "model_config": asdict(model.config),
                     }
-                    torch.save(checkpoint, os.path.join(out_dir, "ckpt.pt"))
+                    torch.save(checkpoint, os.path.join(out_dir, f"ckpt_{iter_num}.pt"))
                     print("Checkpoint saved.")
     
             if iter_num >= max_iters:
