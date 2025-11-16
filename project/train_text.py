@@ -21,15 +21,15 @@ torch.backends.cuda.enable_math_sdp(False)
 
 
 learning_rate = 6e-4 # max learning rate
-max_iters = 600000 # total number of training iterations
+max_iters = 25000 # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0
 
 decay_lr = True # whether to decay the learning rate
-warmup_iters = 2000
-lr_decay_iters = 600000 
+warmup_iters = 40
+lr_decay_iters = 25000 
 min_lr = 6e-5 
 
 backend = 'nccl' 
@@ -63,19 +63,19 @@ def get_lr(it):
 
 
 out_dir = 'out'
-eval_interval = 2000
+eval_interval = 1000
 log_interval = 1
 eval_iters = 200
 always_save_checkpoint = True 
 
-gradient_accumulation_steps = 4 * 8
-batch_size = 16 
+gradient_accumulation_steps = 3 * 8
+batch_size = 20 
 block_size = 1024
 
 model_config = TransformerConfig(
     n_layer     = 12,
-    n_head      = 16,
-    n_embd      = 1024,
+    n_head      = 12,
+    n_embd      = 768,
     dropout     = 0.0,
     vocab_size  = 50304,
     bias        = False,
@@ -223,7 +223,7 @@ while iter_num < max_iters:
         # adjust learning-rate
         if decay_lr:
             for param_group in optimizer.param_groups:
-                param_group["lr"] = get_lr(iter_num - 1)
+                param_group["lr"] = get_lr(iter_num)
 
         # ---------------- forward ----------------
         with fp8_autocast():

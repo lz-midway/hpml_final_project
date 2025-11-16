@@ -68,7 +68,6 @@ def get_loader(batch_size, max_len, num_workers, prefetch_factor):
         pin_memory=True,
         prefetch_factor=prefetch_factor 
     )
-    # added prefetch_factor
 
     return dataloader
     
