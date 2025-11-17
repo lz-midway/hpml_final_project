@@ -209,7 +209,7 @@ class CVNBlocks(nn.Module):
 
 
 class BCVNN(nn.Module):
-    def __init__(self, image_channels=3, filter_dimension=3):
+    def __init__(self, image_channels=3, filter_dimension=3, num_classes=101):
         """
         image_channels: number of input channels (3 for RGB)
         filter_dimension: kernel size for all convolution layers
@@ -256,7 +256,7 @@ class BCVNN(nn.Module):
         # block 6
         self.bnfcl1 = BinaryLinear(in_features=256, out_features=256, activation="relu")
         self.bnfcl2 = BinaryLinear(in_features=256, out_features=256, activation="relu")
-        self.finallayer = BinaryLinear(in_features=256, out_features=101, activation="softmax")
+        self.finallayer = BinaryLinear(in_features=256, out_features=num_classes, activation=None)
     
     def forward(self, x):
         # --- feature extraction ---
