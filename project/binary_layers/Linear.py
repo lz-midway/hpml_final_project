@@ -146,4 +146,24 @@ class Linear_fp8(torch.nn.Module):
 
         return z * self.scale
 
-        
+
+class LinearFull(nn.Module):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, eps: float = 1e-5):  # bias=True
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias = nn.Parameter(torch.zeros(out_features)) if bias else None
+        self.eps = eps
+        self.scale = 0.25  
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.weight)  
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        z = F.linear(x, self.weight, self.bias)
+        mean = z.mean(dim=-1, keepdim=True)
+        std = z.std(dim=-1, keepdim=True, unbiased=False)
+        z = (z - mean) / (std + self.eps) * self.scale
+        return z

@@ -14,6 +14,44 @@ from models import Transformer, TransformerConfig
 from data import text_dataset
 import binary_layers
 
+import os
+import wandb
+import logging
+from torch.profiler import profile, ProfilerActivity
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+import argparse
+
+# Wandb Login key
+os.environ["WANDB_API_KEY"] = "d594f859224e08959ccfb537de51d8761c5c289f"
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--mode", type=str, default="full", choices=["full", "binary", "fp8"], help="full = FP32 baseline, binary = 1-bit model")
+parser.add_argument("--n_embd", type=int, default=768, help="Model size: 512, 768, 1024, etc.")
+parser.add_argument("--local_rank", type=int, default=-1, help="For DDP")
+parser.add_argument("--profile", action="store_true", help="Enable profiling")
+args = parser.parse_args()
+
+# Distributed setup
+if args.local_rank != -1:
+    dist.init_process_group(backend="nccl")
+    torch.cuda.set_device(args.local_rank)
+
+# WandB (only rank 0)
+if args.local_rank in [-1, 0]:
+    wandb.init(project="1bit-llm-c4", name=f"{args.mode}_embd{args.n_embd}", config=vars(args))
+
+# log.txt
+logging.basicConfig(filename="log.txt", level=logging.INFO,
+                    format="%(asctime)s | %(message)s", datefmt="%m-%d %H:%M")
+
+# Select projection layer: either 100% full or 100% binary
+if args.mode == "full":
+    proj = binary_layers.LinearFull
+elif args.mode == "fp8":
+    proj = binary_layers.Linear_fp8
+else:  # binary
+    proj = binary_layers.Linear
 
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
@@ -61,7 +99,6 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 
-
 out_dir = 'out'
 eval_interval = 1000
 log_interval = 1
@@ -75,25 +112,22 @@ block_size = 1024
 model_config = TransformerConfig(
     n_layer     = 12,
     n_head      = 12,
-    n_embd      = 768,
+    n_embd      = args.n_embd,           # ← now configurable
     dropout     = 0.0,
     vocab_size  = 50304,
     bias        = False,
     max_len     = block_size,
     
-    mlp_proj    = binary_layers.Linear,
-    qkv_proj    = binary_layers.Linear,
+    mlp_proj    = proj,  
+    qkv_proj    = proj,
     c_proj      = nn.Linear,
 )
 
 model = Transformer(model_config)
 model.to(device)
 
-
-
-
-
-
+if args.local_rank != -1:
+    model = DDP(model, device_ids=[args.local_rank])
 
 run_config = {
     "learning_rate"               : learning_rate,
@@ -140,8 +174,6 @@ print("==========================================\n")
 
 
 print(f"{model.num_params()} parameters")
-
-
 
 
 
@@ -213,6 +245,18 @@ for i in range(10):
     print(model.generate("Hello, I am an LLM", dataloader.dataset.tok))
 model.train()
 
+prof = None
+if args.profile and args.local_rank in [-1, 0]:
+    prof = profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler("./profiler"),
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True
+    )
+    prof.start()
+
 while iter_num < max_iters:
     # fetch a batch
     for idx, labels in dataloader:
@@ -249,15 +293,22 @@ while iter_num < max_iters:
             micro_batch = 0
 
             model.update_cache()
-
+            
+            if prof is not None:
+                prof.step()
         # ---------------- logging ----------------
             if iter_num % log_interval == 0:
                 lr_current = optimizer.param_groups[0]["lr"]
+                train_loss = loss.item() * gradient_accumulation_steps
                 print(f"iter {iter_num:>8d} | lr {lr_current:.3e} | "
-                      f"loss {loss.item()*gradient_accumulation_steps:.4f} | {(time.time() - iter_start)*1000:.2f}ms")
+                      f"loss {train_loss:.4f} | {(time.time() - iter_start)*1000:.2f}ms")
                 
                 iter_start = time.time()
-
+                # WandB + file logging
+                if args.local_rank in [-1, 0]:
+                    wandb.log({"iter": iter_num, "train_loss": train_loss, "lr": lr_current})
+                    logging.info(f"{iter_num} loss {train_loss:.4f} lr {lr_current:.2e}")
+                    
             # ---------------- evaluation / checkpoint ----------------
             if iter_num % eval_interval == 0 or iter_num == max_iters:
                 
@@ -265,7 +316,10 @@ while iter_num < max_iters:
                 val_loss = estimate_loss(model, val_dataloader)
                 print(f"\nstep {iter_num}: val loss {val_loss:.4f}, "
                       f"time {time.time()-t0:.1f}s\n")
-    
+                
+                if args.local_rank in [-1, 0]:
+                    wandb.log({"val_loss": val_loss, "iter": iter_num})
+                    logging.info(f"{iter_num} val_loss {val_loss:.4f}")   
 
                 for i in range(10):
                     print(model.generate("Hello, I am an LLM", dataloader.dataset.tok))
@@ -284,6 +338,9 @@ while iter_num < max_iters:
     
             if iter_num >= max_iters:
                 break
+
+if prof is not None:
+    prof.stop()
 
 print("Training complete.")
 
