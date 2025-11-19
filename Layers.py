@@ -136,6 +136,9 @@ class BNCVL(nn.Module):
         self.bias = nn.Parameter(torch.zeros(out_channels))
 
         self.activation = self._get_act(activation)
+        # if padding == "same":
+        #     self.padding = kernel_size // 2
+        # else:
         self.padding = 0 if padding is None else padding
 
     def no_grad(self, x):
@@ -184,7 +187,7 @@ class BNCVL(nn.Module):
         return self.activation(z)
 
 
-class CVNBlocks(nn.Module):
+class BCVNBlocks(nn.Module):
     def __init__(self, layers_config):
         """
         a block of multiple BNCVL layers + one maxpool2d layer
@@ -208,6 +211,47 @@ class CVNBlocks(nn.Module):
         return self.sequence(x)
 
 
+class ResidualBCVNBlock(nn.Module):
+    def __init__(self, layers_config):
+        """
+        layers_config: list of exactly TWO dicts for BNCVL layers.
+        Includes residual connections
+        """
+        super().__init__()
+        assert len(layers_config) == 2, "Residual block requires exactly 2 layers"
+
+        cfg1, cfg2 = layers_config
+        self.conv1 = BNCVL(**cfg1)
+        self.conv2 = BNCVL(**cfg2)
+
+        in_c = cfg1["in_channels"]
+        out_c = cfg2["out_channels"]
+
+        # 1x1 conv to match channels if needed
+        if in_c != out_c:
+            self.proj = nn.Conv2d(in_c, out_c, kernel_size=1, stride=1, padding=0, bias=False)
+            self.proj_bn = nn.BatchNorm2d(out_c)
+        else:
+            self.proj = nn.Identity()
+            self.proj_bn = None
+
+        # pooling comes after the residual merge
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+    def forward(self, x):
+        identity = x
+        if not isinstance(self.proj, nn.Identity):
+            identity = self.proj(identity)
+            identity = self.proj_bn(identity)
+
+        out = self.conv1(x)
+        out = self.conv2(out)
+
+        out = out + identity
+        out = self.pool(out)
+        return out
+
+
 class BCVNN(nn.Module):
     def __init__(self, image_channels=3, filter_dimension=3, num_classes=101):
         """
@@ -217,7 +261,7 @@ class BCVNN(nn.Module):
         super().__init__()
 
         # block 1
-        self.block1 = CVNBlocks(
+        self.block1 = ResidualBCVNBlock(
             [
                 {"in_channels": image_channels, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
                 {"in_channels": 32, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
@@ -225,7 +269,7 @@ class BCVNN(nn.Module):
         )
 
         # block 2
-        self.block2 = CVNBlocks(
+        self.block2 = ResidualBCVNBlock(
             [
                 {"in_channels": 32, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
@@ -233,7 +277,7 @@ class BCVNN(nn.Module):
         )
 
         # block 3
-        self.block3 = CVNBlocks(
+        self.block3 = ResidualBCVNBlock(
             [
                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
@@ -241,12 +285,44 @@ class BCVNN(nn.Module):
         )
 
         # block 4
-        self.block4 = CVNBlocks(
+        self.block4 = ResidualBCVNBlock(
             [
                 {"in_channels": 64, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
                 {"in_channels": 128, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
             ]
         )
+
+        # # block 1
+        # self.block1 = BCVNBlocks(
+        #     [
+        #         {"in_channels": image_channels, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+        #         {"in_channels": 32, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+        #     ]
+        # )
+
+        # # block 2
+        # self.block2 = BCVNBlocks(
+        #     [
+        #         {"in_channels": 32, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+        #         {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+        #     ]
+        # )
+
+        # # block 3
+        # self.block3 = BCVNBlocks(
+        #     [
+        #         {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+        #         {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+        #     ]
+        # )
+
+        # # block 4
+        # self.block4 = BCVNBlocks(
+        #     [
+        #         {"in_channels": 64, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+        #         {"in_channels": 128, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+        #     ]
+        # )
 
         # block 5
         self.bncvl9 = BNCVL(in_channels=128, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
