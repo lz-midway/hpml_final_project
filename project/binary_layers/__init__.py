@@ -1,1 +1,1 @@
-from .Linear import Linear, Linear_fp8, LinearFull
+from .Linear import Linear, Linear_fp8

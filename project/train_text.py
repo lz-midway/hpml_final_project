@@ -14,7 +14,6 @@ from models import Transformer, TransformerConfig
 from data import text_dataset
 import binary_layers
 
-import os
 import wandb
 import logging
 from torch.profiler import profile, ProfilerActivity
@@ -22,24 +21,44 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import argparse
 
+from transformers import logging as hf_logging
+hf_logging.set_verbosity_error()
+
 # Wandb Login key
 os.environ["WANDB_API_KEY"] = "d594f859224e08959ccfb537de51d8761c5c289f"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["PYTHONWARNINGS"] = "ignore"
+
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--mode", type=str, default="full", choices=["full", "binary", "fp8"], help="full = FP32 baseline, binary = 1-bit model")
-parser.add_argument("--n_embd", type=int, default=768, help="Model size: 512, 768, 1024, etc.")
+parser.add_argument("--mode", type=str, default="full", choices=["full", "binary", "fp8"])
+parser.add_argument("--n_embd", type=int, default=768)
 parser.add_argument("--local_rank", type=int, default=-1, help="For DDP")
-parser.add_argument("--profile", action="store_true", help="Enable profiling")
+parser.add_argument("--profile", action="store_true")
 args = parser.parse_args()
+
+# If launched with torchrun, override local_rank from env
+if "LOCAL_RANK" in os.environ:
+    args.local_rank = int(os.environ["LOCAL_RANK"])
 
 # Distributed setup
 if args.local_rank != -1:
-    dist.init_process_group(backend="nccl")
     torch.cuda.set_device(args.local_rank)
+    dist.init_process_group(backend="nccl")
+    rank = dist.get_rank()
+else:
+    rank = 0
+    
+is_main_process = (rank == 0)
 
 # WandB (only rank 0)
-if args.local_rank in [-1, 0]:
-    wandb.init(project="1bit-llm-c4", name=f"{args.mode}_embd{args.n_embd}", config=vars(args))
+if is_main_process:
+    wandb.init(
+        project="1bit-llm-c4",
+        name=f"{args.mode}_embd{args.n_embd}",
+        config=vars(args)
+    )
+    os.environ["WANDB_MODE"] = "disabled"
 
 # log.txt
 logging.basicConfig(filename="log.txt", level=logging.INFO,
@@ -47,7 +66,7 @@ logging.basicConfig(filename="log.txt", level=logging.INFO,
 
 # Select projection layer: either 100% full or 100% binary
 if args.mode == "full":
-    proj = binary_layers.LinearFull
+    proj = nn.Linear
 elif args.mode == "fp8":
     proj = binary_layers.Linear_fp8
 else:  # binary
@@ -112,7 +131,7 @@ block_size = 1024
 model_config = TransformerConfig(
     n_layer     = 12,
     n_head      = 12,
-    n_embd      = args.n_embd,           # ← now configurable
+    n_embd      = args.n_embd,
     dropout     = 0.0,
     vocab_size  = 50304,
     bias        = False,
@@ -123,11 +142,26 @@ model_config = TransformerConfig(
     c_proj      = nn.Linear,
 )
 
-model = Transformer(model_config)
-model.to(device)
+model = Transformer(model_config).to(device)
+
+if compile:
+    if is_main_process:
+        print("compiling the model...")
+    unoptimized_model = model
+    model = torch.compile(model)
 
 if args.local_rank != -1:
     model = DDP(model, device_ids=[args.local_rank])
+    
+    # Patch: forward missing attributes to underlying module
+    class _DDPWrapper(torch.nn.parallel.DistributedDataParallel):
+        def __getattr__(self, name):
+            try:
+                return super().__getattr__(name)
+            except AttributeError:
+                return getattr(self.module, name)
+
+    model.__class__ = _DDPWrapper
 
 run_config = {
     "learning_rate"               : learning_rate,
@@ -167,21 +201,12 @@ run_config = {
         "max_len"   : model_config.max_len,
     },
 }
-
-print("\n===== Training / Model Configuration =====")
-pprint(run_config, sort_dicts=False)
-print("==========================================\n")
-
-
-print(f"{model.num_params()} parameters")
-
-
-
-
-if compile:
-    print("compiling the model...")
-    unoptimized_model = model
-    model = torch.compile(model)
+if is_main_process:
+    print("\n===== Training / Model Configuration =====")
+    pprint(run_config, sort_dicts=False)
+    print("==========================================\n")
+    underlying_model = model.module if hasattr(model, "module") else model
+    print(f"{underlying_model.num_params()} parameters")
 
 dataloader, val_dataloader = text_dataset.get_loader(
     batch_size   = batch_size, 
@@ -192,8 +217,6 @@ dataloader, val_dataloader = text_dataset.get_loader(
     
 optimizer = torch.optim.AdamW(lr = learning_rate, weight_decay = weight_decay, betas=(beta1, beta2), params = model.parameters())
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
-
-
 
 def loss_fn(logits, targets):
     # logits: [B, T, vocab], targets: [B, T]
@@ -241,12 +264,14 @@ best_val_loss = 1e9
 micro_batch = 0
 iter_start = time.time()
 
-for i in range(10):
-    print(model.generate("Hello, I am an LLM", dataloader.dataset.tok))
+if is_main_process:
+    with torch.no_grad():
+        print(model.generate("Hello, I am an LLM", dataloader.dataset.tok))
+
 model.train()
 
 prof = None
-if args.profile and args.local_rank in [-1, 0]:
+if args.profile and is_main_process:
     prof = profile(
         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
         schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
@@ -297,7 +322,7 @@ while iter_num < max_iters:
             if prof is not None:
                 prof.step()
         # ---------------- logging ----------------
-            if iter_num % log_interval == 0:
+            if iter_num % log_interval == 0 and is_main_process:
                 lr_current = optimizer.param_groups[0]["lr"]
                 train_loss = loss.item() * gradient_accumulation_steps
                 print(f"iter {iter_num:>8d} | lr {lr_current:.3e} | "
@@ -305,25 +330,23 @@ while iter_num < max_iters:
                 
                 iter_start = time.time()
                 # WandB + file logging
-                if args.local_rank in [-1, 0]:
-                    wandb.log({"iter": iter_num, "train_loss": train_loss, "lr": lr_current})
-                    logging.info(f"{iter_num} loss {train_loss:.4f} lr {lr_current:.2e}")
+                wandb.log({"iter": iter_num, "train_loss": train_loss, "lr": lr_current})
+                logging.info(f"{iter_num} loss {train_loss:.4f} lr {lr_current:.2e}")
                     
             # ---------------- evaluation / checkpoint ----------------
-            if iter_num % eval_interval == 0 or iter_num == max_iters:
+            if (iter_num % eval_interval == 0 or iter_num == max_iters) and is_main_process:
                 
                 t0 = time.time()
                 val_loss = estimate_loss(model, val_dataloader)
                 print(f"\nstep {iter_num}: val loss {val_loss:.4f}, "
                       f"time {time.time()-t0:.1f}s\n")
                 
-                if args.local_rank in [-1, 0]:
-                    wandb.log({"val_loss": val_loss, "iter": iter_num})
-                    logging.info(f"{iter_num} val_loss {val_loss:.4f}")   
+                wandb.log({"val_loss": val_loss, "iter": iter_num})
+                logging.info(f"{iter_num} val_loss {val_loss:.4f}")   
 
-                for i in range(10):
+                with torch.no_grad():
                     print(model.generate("Hello, I am an LLM", dataloader.dataset.tok))
-                    
+                            
                 if val_loss < best_val_loss or always_save_checkpoint:
                     best_val_loss = min(best_val_loss, val_loss)
                     checkpoint = {
@@ -339,10 +362,18 @@ while iter_num < max_iters:
             if iter_num >= max_iters:
                 break
 
+if is_main_process:
+    for i in range(10): 
+        print(model.generate("Hello, I am an LLM", dataloader.dataset.tok))
+
 if prof is not None:
     prof.stop()
 
-print("Training complete.")
+if is_main_process:
+    wandb.save("log.txt")
+
+if is_main_process:
+    print("Training complete.")
 
 
 
