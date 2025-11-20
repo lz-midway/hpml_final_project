@@ -141,6 +141,9 @@ class BNCVL(nn.Module):
         # else:
         self.padding = 0 if padding is None else padding
 
+        # use BatchNorm2d for normalization instead of the original per sample one
+        self.bn = nn.BatchNorm2d(out_channels)
+
     def no_grad(self, x):
         """Stops gradient flow (Straight-Through Estimator)."""
         return x.detach()
@@ -163,11 +166,11 @@ class BNCVL(nn.Module):
             return F.gelu
         raise ValueError(f"Unknown activation {name}")
     
-    def normalize(self, z):
-        """Normalize each feature map in a sample."""
-        mean = z.mean(dim=(1, 2, 3), keepdim=True)
-        std = z.std(dim=(1, 2, 3), keepdim=True) + 1e-8
-        return (z - mean) / std
+    # def normalize(self, z):
+    #     """Normalize each feature map in a sample."""
+    #     mean = z.mean(dim=(1, 2, 3), keepdim=True)
+    #     std = z.std(dim=(1, 2, 3), keepdim=True) + 1e-8
+    #     return (z - mean) / std
 
     def forward(self, x):
         if self.training:
@@ -183,7 +186,8 @@ class BNCVL(nn.Module):
         z = F.conv2d(x, w_q, b_q, stride=1, padding=self.padding)
 
         # Normalize and activate
-        z = self.normalize(z)
+        # z = self.normalize(z)
+        z = self.bn(z)
         return self.activation(z)
 
 
@@ -252,106 +256,74 @@ class ResidualBCVNBlock(nn.Module):
         return out
 
 
-class BCVNN(nn.Module):
-    def __init__(self, image_channels=3, filter_dimension=3, num_classes=101):
-        """
-        image_channels: number of input channels (3 for RGB)
-        filter_dimension: kernel size for all convolution layers
-        """
-        super().__init__()
+# class BCVNN(nn.Module):
+#     def __init__(self, image_channels=3, filter_dimension=3, num_classes=101):
+#         """
+#         image_channels: number of input channels (3 for RGB)
+#         filter_dimension: kernel size for all convolution layers
+#         """
+#         super().__init__()
 
-        # block 1
-        self.block1 = ResidualBCVNBlock(
-            [
-                {"in_channels": image_channels, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-                {"in_channels": 32, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-            ]
-        )
+#         # block 1
+#         self.block1 = ResidualBCVNBlock(
+#             [
+#                 {"in_channels": image_channels, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#                 {"in_channels": 32, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#             ]
+#         )
 
-        # block 2
-        self.block2 = ResidualBCVNBlock(
-            [
-                {"in_channels": 32, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-                {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-            ]
-        )
+#         # block 2
+#         self.block2 = ResidualBCVNBlock(
+#             [
+#                 {"in_channels": 32, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#             ]
+#         )
 
-        # block 3
-        self.block3 = ResidualBCVNBlock(
-            [
-                {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-                {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-            ]
-        )
+#         # block 3
+#         self.block3 = ResidualBCVNBlock(
+#             [
+#                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#             ]
+#         )
 
-        # block 4
-        self.block4 = ResidualBCVNBlock(
-            [
-                {"in_channels": 64, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-                {"in_channels": 128, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-            ]
-        )
+#         # block 4
+#         self.block4 = ResidualBCVNBlock(
+#             [
+#                 {"in_channels": 64, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#                 {"in_channels": 128, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#             ]
+#         )
 
-        # # block 1
-        # self.block1 = BCVNBlocks(
-        #     [
-        #         {"in_channels": image_channels, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-        #         {"in_channels": 32, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-        #     ]
-        # )
+#         # block 5
+#         self.bncvl9 = BNCVL(in_channels=128, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
+#         self.bncvl10 = BNCVL(in_channels=256, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
+#         self.GAP = nn.AdaptiveAvgPool2d((1, 1))
 
-        # # block 2
-        # self.block2 = BCVNBlocks(
-        #     [
-        #         {"in_channels": 32, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-        #         {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-        #     ]
-        # )
-
-        # # block 3
-        # self.block3 = BCVNBlocks(
-        #     [
-        #         {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-        #         {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-        #     ]
-        # )
-
-        # # block 4
-        # self.block4 = BCVNBlocks(
-        #     [
-        #         {"in_channels": 64, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-        #         {"in_channels": 128, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-        #     ]
-        # )
-
-        # block 5
-        self.bncvl9 = BNCVL(in_channels=128, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
-        self.bncvl10 = BNCVL(in_channels=256, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
-        self.GAP = nn.AdaptiveAvgPool2d((1, 1))
-
-        # block 6
-        self.bnfcl1 = BinaryLinear(in_features=256, out_features=256, activation="relu")
-        self.bnfcl2 = BinaryLinear(in_features=256, out_features=256, activation="relu")
-        self.finallayer = BinaryLinear(in_features=256, out_features=num_classes, activation=None)
+#         # block 6
+#         self.bnfcl1 = BinaryLinear(in_features=256, out_features=256, activation="relu")
+#         self.bnfcl2 = BinaryLinear(in_features=256, out_features=256, activation="relu")
+#         self.finallayer = BinaryLinear(in_features=256, out_features=num_classes, activation=None)
     
-    def forward(self, x):
-        # --- feature extraction ---
-        x = self.block1(x)
-        x = self.block2(x)
-        x = self.block3(x)
-        x = self.block4(x)
+#     def forward(self, x):
+#         # --- feature extraction ---
+#         x = self.block1(x)
+#         x = self.block2(x)
+#         x = self.block3(x)
+#         x = self.block4(x)
 
-        # --- final conv + normalization + activation ---
-        x = self.bncvl9(x)
-        x = self.bncvl10(x)
+#         # --- final conv + normalization + activation ---
+#         x = self.bncvl9(x)
+#         x = self.bncvl10(x)
 
-        # --- global average pooling ---
-        x = self.GAP(x)          # shape: [batch, channels, 1, 1]
-        x = torch.flatten(x, 1)  # shape: [batch, channels]
+#         # --- global average pooling ---
+#         x = self.GAP(x)          # shape: [batch, channels, 1, 1]
+#         x = torch.flatten(x, 1)  # shape: [batch, channels]
 
-        # --- fully connected binary layers ---
-        x = self.bnfcl1(x)
-        x = self.bnfcl2(x)
-        x = self.finallayer(x)
+#         # --- fully connected binary layers ---
+#         x = self.bnfcl1(x)
+#         x = self.bnfcl2(x)
+#         x = self.finallayer(x)
 
-        return x
+#         return x

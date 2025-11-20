@@ -120,72 +120,72 @@ class RealResidualCVNBlock(nn.Module):
         return out
 
 
-class RealCVNN(nn.Module):
-    """
-    Non-binary equivalent of BCVNN
-    """
-    def __init__(self, image_channels=3, filter_dimension=3, num_classes=101):
-        super().__init__()
+# class RealCVNN(nn.Module):
+#     """
+#     Non-binary equivalent of BCVNN
+#     """
+#     def __init__(self, image_channels=3, filter_dimension=3, num_classes=101):
+#         super().__init__()
 
-        # block 1
-        self.block1 = RealResidualCVNBlock(
-            [
-                {"in_channels": image_channels, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-                {"in_channels": 32, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-            ]
-        )
+#         # block 1
+#         self.block1 = RealResidualCVNBlock(
+#             [
+#                 {"in_channels": image_channels, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#                 {"in_channels": 32, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#             ]
+#         )
 
-        # block 2
-        self.block2 = RealResidualCVNBlock(
-            [
-                {"in_channels": 32, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-                {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-            ]
-        )
+#         # block 2
+#         self.block2 = RealResidualCVNBlock(
+#             [
+#                 {"in_channels": 32, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#             ]
+#         )
 
-        # block 3
-        self.block3 = RealResidualCVNBlock(
-            [
-                {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-                {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-            ]
-        )
+#         # block 3
+#         self.block3 = RealResidualCVNBlock(
+#             [
+#                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#             ]
+#         )
 
-        # block 4
-        self.block4 = RealResidualCVNBlock(
-            [
-                {"in_channels": 64, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-                {"in_channels": 128, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-            ]
-        )
+#         # block 4
+#         self.block4 = RealResidualCVNBlock(
+#             [
+#                 {"in_channels": 64, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#                 {"in_channels": 128, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
+#             ]
+#         )
 
-        # block 5
-        self.conv9 = RealCVL(in_channels=128, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
-        self.conv10 = RealCVL(in_channels=256, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
-        self.GAP = nn.AdaptiveAvgPool2d((1, 1))
+#         # block 5
+#         self.conv9 = RealCVL(in_channels=128, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
+#         self.conv10 = RealCVL(in_channels=256, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
+#         self.GAP = nn.AdaptiveAvgPool2d((1, 1))
 
-        # block 6
-        self.fc1 = RealLinear(in_features=256, out_features=256, activation="relu", use_layernorm=False)
-        self.fc2 = RealLinear(in_features=256, out_features=256, activation="relu", use_layernorm=False)
-        self.final = RealLinear(in_features=256, out_features=num_classes, activation=None, use_layernorm=False)
+#         # block 6
+#         self.fc1 = RealLinear(in_features=256, out_features=256, activation="relu", use_layernorm=False)
+#         self.fc2 = RealLinear(in_features=256, out_features=256, activation="relu", use_layernorm=False)
+#         self.final = RealLinear(in_features=256, out_features=num_classes, activation=None, use_layernorm=False)
 
-    def forward(self, x):
-        # --- feature extraction ---
-        x = self.block1(x)
-        x = self.block2(x)
-        x = self.block3(x)
-        x = self.block4(x)
+#     def forward(self, x):
+#         # --- feature extraction ---
+#         x = self.block1(x)
+#         x = self.block2(x)
+#         x = self.block3(x)
+#         x = self.block4(x)
 
-        # --- final conv + normalization + activation ---
-        x = self.conv9(x)
-        x = self.conv10(x)
+#         # --- final conv + normalization + activation ---
+#         x = self.conv9(x)
+#         x = self.conv10(x)
 
-        # --- global average pooling ---
-        x = self.GAP(x)          # shape: [batch, 256, 1, 1]
-        x = torch.flatten(x, 1)  # shape: [batch, 256]
+#         # --- global average pooling ---
+#         x = self.GAP(x)          # shape: [batch, 256, 1, 1]
+#         x = torch.flatten(x, 1)  # shape: [batch, 256]
 
-        # --- fully connected binary layers ---
-        x = self.fc1(x)
-        x = self.fc2(x)
-        x = self.final(x)
-        return x
+#         # --- fully connected binary layers ---
+#         x = self.fc1(x)
+#         x = self.fc2(x)
+#         x = self.final(x)
+#         return x
