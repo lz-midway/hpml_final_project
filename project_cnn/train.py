@@ -73,31 +73,49 @@ if device.type == "cuda":
 else:
     amp_dtype = None
 
+
+
+# WandB (only rank 0 has wandb logging)
+if not is_main_process:
+    os.environ["WANDB_MODE"] = "disabled"
+
+if is_main_process:
+    wandb.init(
+        project="hpml-final"
+    )
+else:
+    wandb.init(mode="disabled")
+
 # parameters
-epochs = 20
-lr = 1e-4
-filter_dimension = 3
-compile = True
-batch_size = 64
-num_workers = 4
-kernel_size = filter_dimension
-log_interval = 10
-save_every = 50
-checkpoint_path = "checkpoint.pt"
-resume = False
+
+config = wandb.config
+
+epochs = config.epochs
+lr = config.lr
+filter_dimension = config.filter_dimension
+compile_mode = config.compile
+batch_size = config.batch_size
+num_workers = config.num_workers
+kernel_size = config.kernel_size
+log_interval = config.log_interval
+save_every = config.save_every
+checkpoint_path = config.checkpoint_path
+resume = config.resume
 
 model_config = {
-    "block1": "real",      
-    "block2": "real",
-    "block3": "real",
-    "block4": "real",
-    "conv9": "real",
-    "conv10": "real",
-    "fc1": "real",
-    "fc2": "real",
-    "final": "real"
+    "block1": config.model_config['block1'],
+    "block2": config.model_config['block2'],
+    "block3": config.model_config['block3'],
+    "block4": config.model_config['block4'],
+    "conv9": config.model_config['conv9'],
+    "conv10": config.model_config['conv10'],
+    "fc1": config.model_config['fc1'],
+    "fc2": config.model_config['fc2'],
+    "final": config.model_config['final']
 }
 config_string = "".join([value[0] for value in model_config.values()])
+if is_main_process:
+    wandb.run.name = f"food101-modular-nn-sweeprun-{config_string}-1"
 
 def save_checkpoint(epoch, model, optimizer, scheduler, scaler, path):
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
@@ -117,26 +135,6 @@ ctx = nullcontext() if amp_dtype is None else torch.amp.autocast(device_type=dev
 scaler = GradScaler(enabled=use_grad_scaler)
 
 
-# WandB (only rank 0 has wandb logging)
-if not is_main_process:
-    os.environ["WANDB_MODE"] = "disabled"
-
-if is_main_process:
-    wandb.init(
-        project="hpml-final",
-        name=f"food101-modular-nn-test-{config_string}-1",
-        config={
-            "model_name": "Modular-CVNN", "gpu-type": "RTX 5090",
-            "batch_size": batch_size, "lr": lr,
-            "optimizer": "Adam", "num_workers": num_workers,
-            "kernel_size": kernel_size, "filter_dimension": filter_dimension,
-            "epochs": epochs, "compile_mode": compile,
-            "model_config": model_config,
-            "device": str(device)
-        }
-    )
-else:
-    wandb.init(mode="disabled")
 
 
 
@@ -147,7 +145,7 @@ model = Models.MixedCVNN(model_config=model_config, image_channels=3, filter_dim
 # model = RealLayers.RealCVNN(image_channels=3, filter_dimension=filter_dimension).to(device)
 
 # torch compile before DDP wrap
-if compile:
+if compile_mode:
     if is_main_process:
         print("compiling the model...")
     model = torch.compile(model)

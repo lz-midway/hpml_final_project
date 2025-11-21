@@ -1,0 +1,54 @@
+# sweep.yaml
+program: train.py
+method: grid
+metric:
+  name: test/accuracy
+  goal: maximize
+
+parameters:
+  epochs:
+    value: 10
+  lr:
+    value: 1e-4
+  batch_size:
+    value: 64
+  filter_dimension:
+    value: 3
+  compile:
+    value: true
+  num_workers:
+    value: 4
+  kernel_size:
+    value: 3
+  log_interval:
+    value: 10
+  save_every:
+    value: 50
+  checkpoint_path:
+    value: "checkpoint.pt"
+  resume:
+    value: false
+
+  # Sweep over conv/residual blocks
+  model_config:
+    parameters:
+      block1:
+        values: ["real", "binary"]
+      block2:
+        values: ["real", "binary"]
+      block3:
+        values: ["real", "binary"]
+      block4:
+        values: ["real", "binary"]
+      conv9:
+        values: ["real", "binary"]
+      conv10:
+        values: ["real", "binary"]
+
+      # Keep last three layers fixed as binary
+      fc1:
+        value: "binary"
+      fc2:
+        value: "binary"
+      final:
+        value: "binary"
