@@ -35,6 +35,8 @@ parser.add_argument("--mode", type=str, default="full", choices=["full", "binary
 parser.add_argument("--n_embd", type=int, default=768)
 parser.add_argument("--local_rank", type=int, default=-1, help="For DDP")
 parser.add_argument("--profile", action="store_true")
+parser.add_argument("--resume_run", type=str, default=None, help="W&B run id or 'auto' to resume latest run")
+
 args = parser.parse_args()
 
 # If launched with torchrun, override local_rank from env
@@ -50,19 +52,6 @@ else:
     rank = 0
     
 is_main_process = (rank == 0)
-
-# WandB (only rank 0)
-if is_main_process:
-    wandb.init(
-        project="1bit-llm-c4",
-        name=f"{args.mode}_embd{args.n_embd}",
-        config=vars(args)
-    )
-    os.environ["WANDB_MODE"] = "disabled"
-
-# log.txt
-logging.basicConfig(filename="log.txt", level=logging.INFO,
-                    format="%(asctime)s | %(message)s", datefmt="%m-%d %H:%M")
 
 # Select projection layer: either 100% full or 100% binary
 if args.mode == "full":
@@ -124,7 +113,7 @@ log_interval = 1
 eval_iters = 200
 always_save_checkpoint = True 
 
-gradient_accumulation_steps = 3 * 8
+gradient_accumulation_steps = 3 * 4
 batch_size = 20 
 block_size = 1024
 
@@ -151,8 +140,15 @@ if compile:
     model = torch.compile(model)
 
 if args.local_rank != -1:
-    model = DDP(model, device_ids=[args.local_rank])
-    
+    ddp_kwargs = {
+        "device_ids": [args.local_rank],
+    }
+    # binary/fp8 modes may have params not used every step
+    if args.mode != "full":
+        ddp_kwargs["find_unused_parameters"] = True
+
+    model = DDP(model, **ddp_kwargs)
+
     # Patch: forward missing attributes to underlying module
     class _DDPWrapper(torch.nn.parallel.DistributedDataParallel):
         def __getattr__(self, name):
@@ -261,6 +257,70 @@ model.train()
 
 iter_num = 0
 best_val_loss = 1e9
+
+latest_iter = -1
+resume_path = None
+
+if os.path.isdir(out_dir):
+    for fname in os.listdir(out_dir):
+        if fname.startswith("ckpt_") and fname.endswith(".pt"):
+            try:
+                it = int(fname.split("_")[1].split(".")[0])
+                if it > latest_iter:
+                    latest_iter = it
+                    resume_path = os.path.join(out_dir, fname)
+            except ValueError:
+                pass
+
+if resume_path is not None:
+    if is_main_process:
+        print(f"Resuming from checkpoint: {resume_path}")
+    checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
+    model.load_state_dict(checkpoint["model"])
+    optimizer.load_state_dict(checkpoint["optimizer"])
+    iter_num = checkpoint["iter_num"]
+    best_val_loss = checkpoint["val_loss"]
+
+# WandB (only rank 0)
+if is_main_process:
+    logging.basicConfig(
+        filename="log.txt",
+        level=logging.INFO,
+        format="%(asctime)s | %(message)s",
+        datefmt="%m-%d %H:%M"
+    )
+
+    if args.resume_run is not None:
+        # AUTO-DETECT MOST RECENT RUN
+        if args.resume_run == "auto":
+            api = wandb.Api()
+            runs = api.runs("1bit-llm-c4")
+            if len(runs) == 0:
+                raise RuntimeError("No prior wandb runs found for auto-resume.")
+            latest = sorted(runs, key=lambda r: r.created_at)[-1]
+            resume_id = latest.id
+            print(f"[W&B] Auto-resuming latest run: {resume_id}")
+        else:
+            resume_id = args.resume_run
+            print(f"[W&B] Resuming provided run: {resume_id}")
+
+        wandb.init(
+            project="1bit-llm-c4",
+            id=resume_id,
+            name=f"{args.mode}_embd{args.n_embd}",
+            config=vars(args),
+            resume="allow",
+        )
+    else:
+        # Start a NEW run
+        wandb.init(
+            project="1bit-llm-c4",
+            name=f"{args.mode}_embd{args.n_embd}",
+            config=vars(args)
+        )
+
+    # os.environ["WANDB_MODE"] = "disabled"
+
 micro_batch = 0
 iter_start = time.time()
 
@@ -343,12 +403,18 @@ while iter_num < max_iters:
                 
                 wandb.log({"val_loss": val_loss, "iter": iter_num})
                 logging.info(f"{iter_num} val_loss {val_loss:.4f}")   
-
+                
+                torch.cuda.synchronize()
+                gen_model = model.module if hasattr(model, "module") else model
                 with torch.no_grad():
-                    print(model.generate("Hello, I am an LLM", dataloader.dataset.tok))
-                            
+                    print(gen_model.generate("Hello, I am an LLM", dataloader.dataset.tok))
+                   
                 if val_loss < best_val_loss or always_save_checkpoint:
                     best_val_loss = min(best_val_loss, val_loss)
+
+                    ckpt_name = f"ckpt_{iter_num}.pt"
+                    ckpt_path = os.path.join(out_dir, ckpt_name)
+
                     checkpoint = {
                         "model": model.state_dict(),
                         "optimizer": optimizer.state_dict(),
@@ -356,9 +422,26 @@ while iter_num < max_iters:
                         "val_loss": val_loss,
                         "model_config": asdict(model.config),
                     }
-                    torch.save(checkpoint, os.path.join(out_dir, f"ckpt_{iter_num}.pt"))
-                    print("Checkpoint saved.")
-    
+                    torch.save(checkpoint, ckpt_path)
+                    print("Checkpoint saved:", ckpt_path)
+                    if iter_num % 5000 == 0 and iter_num > 0:
+                        extra_ckpt_name = f"extra_ckpt_{iter_num}.pt"
+                        extra_ckpt_path = os.path.join(out_dir, extra_ckpt_name)
+                        torch.save(checkpoint, extra_ckpt_path)
+                        print("Saved 5000-iter checkpoint:", extra_ckpt_path)
+                    # delete all other checkpoints
+                    for fname in os.listdir(out_dir):
+                        if (
+                            fname.startswith("ckpt_")
+                            and fname.endswith(".pt")
+                            and fname != ckpt_name
+                        ):
+                            try:
+                                os.remove(os.path.join(out_dir, fname))
+                                print("Deleted old ckpt:", fname)
+                            except Exception as e:
+                                print("Could not delete", fname, "reason:", e)
+
             if iter_num >= max_iters:
                 break
 
@@ -374,16 +457,3 @@ if is_main_process:
 
 if is_main_process:
     print("Training complete.")
-
-
-
-
-
-
-
-
-
-
-
-
-    
