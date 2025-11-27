@@ -139,7 +139,7 @@ class Transformer(nn.Module):
     def update_cache(self):
         self.apply(self._update_cache)
     def _update_cache(self, module):
-        if isinstance(module, binary_layers.Linear):
+        if isinstance(module, (binary_layers.Linear, binary_layers.Linear_fp8)):
             module.update_cache()
 
     def forward(self, idx):

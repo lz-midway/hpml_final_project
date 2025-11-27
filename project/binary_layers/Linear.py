@@ -23,14 +23,15 @@ class Linear(torch.nn.Module):
                  out_features: int,
                  bias: bool = True,
                  activation: str | None = None,
-                 eps: float = 1e-5):
+                 eps: float = 1e-5,
+                 scale_init: float = 0.25):
         super().__init__()
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         self.bias = nn.Parameter(torch.zeros(out_features)) if bias else None
         self.reset_parameters()
         self.eps = eps
 
-        self.scale = 1/4
+        self.scale = nn.Parameter(torch.tensor(scale_init, dtype=torch.float32))
         
         self.register_buffer('_w_cache', None, persistent=False)
         self.register_buffer('_w_bin', None, persistent=False)
@@ -145,5 +146,3 @@ class Linear_fp8(torch.nn.Module):
         z = (z - mean) / (std + self.eps) 
 
         return z * self.scale
-
-        

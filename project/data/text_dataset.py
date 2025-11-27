@@ -80,4 +80,41 @@ def get_loader(batch_size, max_len, num_workers, prefetch_factor):
     )
 
     return dataloader, val_dataloader
+
+import torch.distributed as dist
+
+def get_loader_distributed(batch_size, max_len, num_workers, prefetch_factor):
+    
+    if not (dist.is_available() and dist.is_initialized()):
+        raise RuntimeError("get_loader_distributed called without DDP initialized")
+
+    world_size = dist.get_world_size()
+    rank       = dist.get_rank()
+
+    train_shard = dataset.shard(num_shards=world_size, index=rank)
+    val_shard   = val_dataset.shard(num_shards=world_size, index=rank)
+
+    block_stream     = BlockDataset(train_shard, tokenizer, max_len)
+    val_block_stream = BlockDataset(val_shard,   tokenizer, max_len)
+
+    dataloader = DataLoader(
+        block_stream,
+        batch_size=batch_size,
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        pin_memory=True,
+        prefetch_factor=prefetch_factor,
+    )
+
+    val_dataloader = DataLoader(
+        val_block_stream,
+        batch_size=batch_size,
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        pin_memory=True,
+        prefetch_factor=prefetch_factor,
+    )
+
+    return dataloader, val_dataloader
+
     
