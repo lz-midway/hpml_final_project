@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 
 
-from Layers import ResidualBCVNBlock, BNCVL, BinaryLinear
-from RealLayers import RealResidualCVNBlock, RealCVL, RealLinear
+from binary_layers.Layers import ResidualBCVNBlock, BNCVL, BinaryLinear
+from real_layers.RealLayers import RealResidualCVNBlock, RealCVL, RealLinear
 
 
 class BCVNN(nn.Module):

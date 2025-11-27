@@ -1,5 +1,5 @@
 # sweep.yaml
-program: train.py
+program: train_cnn.py
 method: grid
 metric:
   name: test/accuracy

@@ -4,7 +4,8 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import RealLayers, Layers, loaders, Models
+import data.image_dataset
+import models.Models
 import wandb
 import time
 import logging
@@ -81,7 +82,32 @@ if not is_main_process:
 
 if is_main_process:
     wandb.init(
-        project="hpml-final"
+        project="hpml-final",
+        name="food101-modular-nn-sweeprun",
+        config={
+            "model_name": "Modular-CVNN",
+            "gpu-type": "RTX 5090",
+            "batch_size": 64,      # default, will be overridden by sweep
+            "lr": 1e-4,
+            "optimizer": "Adam",
+            "num_workers": 4,
+            "kernel_size": 3,
+            "filter_dimension": 3,
+            "epochs": 10,
+            "compile_mode": True,
+            "model_config": {
+                "block1": "real",
+                "block2": "real",
+                "block3": "real",
+                "block4": "real",
+                "conv9": "real",
+                "conv10": "real",
+                "fc1": "binary",
+                "fc2": "binary",
+                "final": "binary"
+            },
+            "device": str(device)
+        }
     )
 else:
     wandb.init(mode="disabled")
@@ -139,7 +165,7 @@ scaler = GradScaler(enabled=use_grad_scaler)
 
 
 # Initialize model, loss, optimizer, prepare for DDP
-model = Models.MixedCVNN(model_config=model_config, image_channels=3, filter_dimension=filter_dimension).to(device)
+model = models.Models.MixedCVNN(model_config=model_config, image_channels=3, filter_dimension=filter_dimension).to(device)
 
 # # Initialize model, loss, optimizer, prepare for DDP
 # model = RealLayers.RealCVNN(image_channels=3, filter_dimension=filter_dimension).to(device)
@@ -193,7 +219,7 @@ if resume and os.path.exists(checkpoint_path):
 
 # acquire data
 if use_ddp:
-    train_loader, test_loader = loaders.get_food101_dataloaders(
+    train_loader, test_loader = data.image_dataset.get_food101_dataloaders(
         distributed=(args.local_rank != -1),
         rank=rank,
         world_size=dist.get_world_size() if args.local_rank != -1 else 1,
@@ -201,7 +227,7 @@ if use_ddp:
         num_workers=num_workers
     )
 else:
-    train_loader, test_loader = loaders.get_food101_dataloaders()
+    train_loader, test_loader = data.image_dataset.get_food101_dataloaders()
 
 
 # Training loop

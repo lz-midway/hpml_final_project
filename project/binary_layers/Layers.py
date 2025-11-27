@@ -1,3 +1,6 @@
+# these are layers for CNN
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,13 +20,15 @@ class BinaryLinear(nn.Module):
                  out_features: int,
                  bias: bool = True,
                  activation: str | None = None,
-                 eps: float = 1e-5):
+                 eps: float = 1e-5,
+                 scale_init: float = 0.25):
         super().__init__()
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         self.bias = nn.Parameter(torch.zeros(out_features)) if bias else None
         self.reset_parameters()
         self.activation = self._get_act(activation)
         self.eps = eps
+        self.scale = nn.Parameter(torch.tensor(scale_init, dtype=torch.float32))
 
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.weight)
@@ -73,7 +78,7 @@ class BinaryLinear(nn.Module):
         # Per-example normalisation  (last dimension)
         mean = z.mean(dim=-1, keepdim=True)
         std = z.std(dim=-1, keepdim=True, unbiased=False)
-        z = (z - mean) / (std + self.eps)
+        z = (z - mean) / (std + self.eps) * self.scale
 
         # Activation
         return self.activation(z)
@@ -135,6 +140,9 @@ class BNCVL(nn.Module):
         )
         self.bias = nn.Parameter(torch.zeros(out_channels))
 
+        # adding scaling factor
+        self.scale = nn.Parameter(torch.ones(out_channels, 1, 1, 1))
+
         self.activation = self._get_act(activation)
         # if padding == "same":
         #     self.padding = kernel_size // 2
@@ -173,13 +181,17 @@ class BNCVL(nn.Module):
     #     return (z - mean) / std
 
     def forward(self, x):
+        w_bin = self.quantize(self.weight)
+
+        w_scaled = w_bin * self.scale
+
         if self.training:
             # Quantization during training (STE approximation)
-            w_q = self.weight + self.no_grad(self.quantize(self.weight) - self.weight)
+            w_q = self.weight + self.no_grad(w_scaled - self.weight)
             b_q = self.bias + self.no_grad(self.quantize(self.bias) - self.bias)
         else:
             # Quantization during inference
-            w_q = self.quantize(self.weight)
+            w_q = w_scaled
             b_q = self.quantize(self.bias)
 
         # Perform convolution with quantized weights
@@ -255,75 +267,3 @@ class ResidualBCVNBlock(nn.Module):
         out = self.pool(out)
         return out
 
-
-# class BCVNN(nn.Module):
-#     def __init__(self, image_channels=3, filter_dimension=3, num_classes=101):
-#         """
-#         image_channels: number of input channels (3 for RGB)
-#         filter_dimension: kernel size for all convolution layers
-#         """
-#         super().__init__()
-
-#         # block 1
-#         self.block1 = ResidualBCVNBlock(
-#             [
-#                 {"in_channels": image_channels, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-#                 {"in_channels": 32, "out_channels": 32, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-#             ]
-#         )
-
-#         # block 2
-#         self.block2 = ResidualBCVNBlock(
-#             [
-#                 {"in_channels": 32, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-#                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-#             ]
-#         )
-
-#         # block 3
-#         self.block3 = ResidualBCVNBlock(
-#             [
-#                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-#                 {"in_channels": 64, "out_channels": 64, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-#             ]
-#         )
-
-#         # block 4
-#         self.block4 = ResidualBCVNBlock(
-#             [
-#                 {"in_channels": 64, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-#                 {"in_channels": 128, "out_channels": 128, "kernel_size": filter_dimension, "activation": "relu", "padding": "same"},
-#             ]
-#         )
-
-#         # block 5
-#         self.bncvl9 = BNCVL(in_channels=128, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
-#         self.bncvl10 = BNCVL(in_channels=256, out_channels=256, kernel_size=filter_dimension, activation="relu", padding="same")
-#         self.GAP = nn.AdaptiveAvgPool2d((1, 1))
-
-#         # block 6
-#         self.bnfcl1 = BinaryLinear(in_features=256, out_features=256, activation="relu")
-#         self.bnfcl2 = BinaryLinear(in_features=256, out_features=256, activation="relu")
-#         self.finallayer = BinaryLinear(in_features=256, out_features=num_classes, activation=None)
-    
-#     def forward(self, x):
-#         # --- feature extraction ---
-#         x = self.block1(x)
-#         x = self.block2(x)
-#         x = self.block3(x)
-#         x = self.block4(x)
-
-#         # --- final conv + normalization + activation ---
-#         x = self.bncvl9(x)
-#         x = self.bncvl10(x)
-
-#         # --- global average pooling ---
-#         x = self.GAP(x)          # shape: [batch, channels, 1, 1]
-#         x = torch.flatten(x, 1)  # shape: [batch, channels]
-
-#         # --- fully connected binary layers ---
-#         x = self.bnfcl1(x)
-#         x = self.bnfcl2(x)
-#         x = self.finallayer(x)
-
-#         return x
