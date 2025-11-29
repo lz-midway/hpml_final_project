@@ -151,6 +151,60 @@ class RealCVNN(nn.Module):
         return x
     
 
+class ResidualConvGAPBlock(nn.Module):
+    """
+    Residual block with two conv layers (conv9, conv10) that can independently
+    be binary or real. Uses global average pooling (GAP) at the end.
+    """
+    def __init__(self, kind1, kind2, in_c, mid_c, filter_dim=3):
+        super().__init__()
+
+        # conv9
+        if kind1 == "binary":
+            self.conv1 = BNCVL(in_channels=in_c, out_channels=mid_c, kernel_size=filter_dim,
+                               activation="relu", padding="same")
+        elif kind1 == "real":
+            self.conv1 = RealCVL(in_channels=in_c, out_channels=mid_c, kernel_size=filter_dim,
+                                 activation="relu", padding="same")
+        else:
+            raise ValueError(f"Unknown conv type for conv9: {kind1}")
+
+        # conv10
+        if kind2 == "binary":
+            self.conv2 = BNCVL(in_channels=mid_c, out_channels=mid_c, kernel_size=filter_dim,
+                               activation="relu", padding="same")
+        elif kind2 == "real":
+            self.conv2 = RealCVL(in_channels=mid_c, out_channels=mid_c, kernel_size=filter_dim,
+                                 activation="relu", padding="same")
+        else:
+            raise ValueError(f"Unknown conv type for conv10: {kind2}")
+
+        # 1x1 projection if needed
+        if in_c != mid_c:
+            self.proj = nn.Conv2d(in_c, mid_c, kernel_size=1, stride=1, padding=0, bias=False)
+            self.proj_bn = nn.BatchNorm2d(mid_c)
+        else:
+            self.proj = nn.Identity()
+            self.proj_bn = None
+
+        # Global average pooling
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+
+    def forward(self, x):
+        identity = x
+        if not isinstance(self.proj, nn.Identity):
+            identity = self.proj(identity)
+            identity = self.proj_bn(identity)
+
+        out = self.conv1(x)
+        out = self.conv2(out)
+
+        out = out + identity
+        out = self.pool(out)
+        return out
+
+
+
 class MixedCVNN(nn.Module):
     def __init__(self, model_config, image_channels=3, filter_dimension=3, num_classes=101):
         super().__init__()
@@ -219,9 +273,18 @@ class MixedCVNN(nn.Module):
 
         # ------------------ conv layers ------------------
 
-        self.conv9 = choose_conv(model_config["conv9"], 128, 256)
-        self.conv10 = choose_conv(model_config["conv10"], 256, 256)
-        self.GAP = nn.AdaptiveAvgPool2d((1, 1))
+        # self.conv9 = choose_conv(model_config["conv9"], 128, 256)
+        # self.conv10 = choose_conv(model_config["conv10"], 256, 256)
+        # Replacing the old conv layers with a Block that includes GAP and residual connection
+        self.conv_block = ResidualConvGAPBlock(
+            kind1=model_config["conv9"],
+            kind2=model_config["conv10"],
+            in_c=128,
+            mid_c=256,
+            filter_dim=filter_dimension
+        )
+
+        self.GAP = nn.AdaptiveAvgPool2d((1, 1)) # not used as the previous block already has it
 
         # ------------------ fully connected layers ------------------
 
@@ -241,11 +304,12 @@ class MixedCVNN(nn.Module):
         x = self.block4(x)
 
         # --- final conv + normalization + activation ---
-        x = self.conv9(x)
-        x = self.conv10(x)
+        # x = self.conv9(x)
+        # x = self.conv10(x)
+        x = self.conv_block(x)
 
         # --- global average pooling ---
-        x = self.GAP(x)          # shape: [batch, 256, 1, 1]
+        # x = self.GAP(x)          # shape: [batch, 256, 1, 1]
         x = torch.flatten(x, 1)  # shape: [batch, 256]
 
         # --- fully connected layers ---

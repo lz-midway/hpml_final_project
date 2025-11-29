@@ -75,33 +75,37 @@ else:
     amp_dtype = None
 
 
-
 # WandB (only rank 0 has wandb logging)
 if not is_main_process:
     os.environ["WANDB_MODE"] = "disabled"
 
 if is_main_process:
+    # NOTE: config may be overridden by sweep agent; defaults work for normal runs
     wandb.init(
         project="hpml-final",
-        name="food101-modular-nn-sweeprun",
+        name="food101-modular-nn-validate-scaling",
         config={
             "model_name": "Modular-CVNN",
             "gpu-type": "RTX 5090",
-            "batch_size": 64,      # default, will be overridden by sweep
+            "batch_size": 64,
             "lr": 1e-4,
             "optimizer": "Adam",
             "num_workers": 4,
             "kernel_size": 3,
             "filter_dimension": 3,
-            "epochs": 10,
-            "compile_mode": True,
+            "epochs": 400,
+            "compile": True,
+            "log_interval": 10,
+            "save_every": 50,
+            "checkpoint_path": "checkpoint.pt",
+            "resume": False,
             "model_config": {
-                "block1": "real",
-                "block2": "real",
-                "block3": "real",
-                "block4": "real",
-                "conv9": "real",
-                "conv10": "real",
+                "block1": "binary",
+                "block2": "binary",
+                "block3": "binary",
+                "block4": "binary",
+                "conv9": "binary",
+                "conv10": "binary",
                 "fc1": "binary",
                 "fc2": "binary",
                 "final": "binary"
@@ -112,36 +116,32 @@ if is_main_process:
 else:
     wandb.init(mode="disabled")
 
+# broadcast sweep/default config to all ranks
+raw_cfg = dict(wandb.config) if is_main_process else None
+obj_list = [raw_cfg]
+dist.broadcast_object_list(obj_list, src=0)
+cfg = obj_list[0]      # all ranks now share identical config
+
 # parameters
+epochs = cfg["epochs"]
+lr = cfg["lr"]
+filter_dimension = cfg["filter_dimension"]
+compile_mode = cfg["compile"]
+batch_size = cfg["batch_size"]
+num_workers = cfg["num_workers"]
+kernel_size = cfg["kernel_size"]
+log_interval = cfg["log_interval"]
+save_every = cfg["save_every"]
+checkpoint_path = cfg["checkpoint_path"]
+resume = cfg["resume"]
 
-config = wandb.config
+model_config = cfg["model_config"]
 
-epochs = config.epochs
-lr = config.lr
-filter_dimension = config.filter_dimension
-compile_mode = config.compile
-batch_size = config.batch_size
-num_workers = config.num_workers
-kernel_size = config.kernel_size
-log_interval = config.log_interval
-save_every = config.save_every
-checkpoint_path = config.checkpoint_path
-resume = config.resume
+config_string = "".join([model_config[k][0] for k in model_config])
 
-model_config = {
-    "block1": config.model_config['block1'],
-    "block2": config.model_config['block2'],
-    "block3": config.model_config['block3'],
-    "block4": config.model_config['block4'],
-    "conv9": config.model_config['conv9'],
-    "conv10": config.model_config['conv10'],
-    "fc1": config.model_config['fc1'],
-    "fc2": config.model_config['fc2'],
-    "final": config.model_config['final']
-}
-config_string = "".join([value[0] for value in model_config.values()])
 if is_main_process:
-    wandb.run.name = f"food101-modular-nn-sweeprun-{config_string}-1"
+    wandb.run.name = f"food101-modular-nn-sweeprun-{config_string}-chnnorm0.25"
+
 
 def save_checkpoint(epoch, model, optimizer, scheduler, scaler, path):
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):

@@ -7,7 +7,7 @@ metric:
 
 parameters:
   epochs:
-    value: 10
+    value: 50
   lr:
     value: 1e-4
   batch_size:
@@ -33,19 +33,17 @@ parameters:
   model_config:
     parameters:
       block1:
-        values: ["real", "binary"]
+        value: "binary"
       block2:
-        values: ["real", "binary"]
+        value: "binary"
       block3:
-        values: ["real", "binary"]
+        value: "binary"
       block4:
-        values: ["real", "binary"]
+        value: "binary"
       conv9:
         values: ["real", "binary"]
       conv10:
         values: ["real", "binary"]
-
-      # Keep last three layers fixed as binary
       fc1:
         value: "binary"
       fc2:
