@@ -91,25 +91,25 @@ if is_main_process:
             "lr": 1e-4,
             "optimizer": "Adam",
             "num_workers": 4,
-            "kernel_size": 3,
-            "filter_dimension": 3,
+            "kernel_size": 5,
+            "filter_dimension": 5,
             "epochs": 1000,
             "compile": True,
             "log_interval": 10,
             "save_every": 50,
             "checkpoint_path": "checkpoint.pt",
-            "resume": True,
+            "resume": False,
             "model_config": {
                 "conv1": "binary",
                 "conv2": "binary",
                 "conv3": "binary",
                 "conv4": "binary",
                 "conv5": "binary",
-                "conv6": "real",
-                "conv7": "real",
-                "conv8": "real",
-                "conv9": "real",
-                "conv10": "real",
+                "conv6": "binary",
+                "conv7": "binary",
+                "conv8": "binary",
+                "conv9": "binary",
+                "conv10": "binary",
                 "fc1": "binary",
                 "fc2": "binary",
                 "final": "binary"
@@ -144,7 +144,7 @@ model_config = cfg["model_config"]
 config_string = "".join([model_config[k][0] for k in model_config])
 
 if is_main_process:
-    wandb.run.name = f"food101-modular-nn-sweeprun-{config_string}-chnnorm0.25"
+    wandb.run.name = f"food101-modular-nn-{config_string}-filter5-allbin-1"
 
 
 def save_checkpoint(epoch, model, optimizer, scheduler, scaler, path):
