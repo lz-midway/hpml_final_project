@@ -232,7 +232,7 @@ The `project` name should be updated as needed to match your wandb workspace.
 Within `train_cnn.py`, each run’s name is programmatically adjusted:
 
 ```python
-wandb.run.name = f"food101-modular-nn-{config_string}-filter5-allbin-scheduler-moved-1"
+wandb.run.name = f"food101-modular-nn-{config_string}-test-1"
 ```
 
 Here:
