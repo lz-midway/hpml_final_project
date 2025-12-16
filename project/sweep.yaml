@@ -6,20 +6,24 @@ metric:
   goal: maximize
 
 parameters:
-  epochs:
-    value: 50
-  lr:
-    value: 1e-4
+  model_name:
+    value: "Modular-CVNN"
+  gpu-type:
+    value: "RTX 5090"
   batch_size:
     value: 64
-  filter_dimension:
-    value: 3
-  compile:
-    value: true
+  lr:
+    value: 1e-4
+  optimizer:
+    value: Adam
   num_workers:
     value: 4
-  kernel_size:
+  filter_dimension:
     value: 3
+  epochs:
+    value: 50
+  compile:
+    value: true
   log_interval:
     value: 10
   save_every:
@@ -32,14 +36,22 @@ parameters:
   # Sweep over conv/residual blocks
   model_config:
     parameters:
-      block1:
-        value: "binary"
-      block2:
-        value: "binary"
-      block3:
-        value: "binary"
-      block4:
-        value: "binary"
+      conv1:
+        values: ["real", "binary"]
+      conv2:
+        values: ["real", "binary"]
+      conv3:
+        values: ["real", "binary"]
+      conv4:
+        values: ["real", "binary"]
+      conv5:
+        values: ["real", "binary"]
+      conv6:
+        values: ["real", "binary"]
+      conv7:
+        values: ["real", "binary"]
+      conv8:
+        values: ["real", "binary"]
       conv9:
         values: ["real", "binary"]
       conv10:

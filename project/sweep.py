@@ -5,8 +5,8 @@ import yaml
 
 
 # Wandb Login key
-os.environ["WANDB_API_KEY"] = "0f853b7aa9e6bd44416474b253642758cf20704f"
-os.environ["PYTHONWARNINGS"] = "ignore"
+# os.environ["WANDB_API_KEY"] = ""
+# os.environ["PYTHONWARNINGS"] = "ignore"
 
 with open("sweep.yaml") as f:
     sweep_config = yaml.safe_load(f)

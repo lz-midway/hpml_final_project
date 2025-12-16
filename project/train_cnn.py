@@ -29,8 +29,8 @@ logging.basicConfig(filename="log.txt", level=logging.INFO,
 torch.manual_seed(42)
 
 # Wandb Login key
-os.environ["WANDB_API_KEY"] = "0f853b7aa9e6bd44416474b253642758cf20704f"
-os.environ["PYTHONWARNINGS"] = "ignore"
+# os.environ["WANDB_API_KEY"] = ""
+# os.environ["PYTHONWARNINGS"] = "ignore"
 
 # parser setup
 parser = argparse.ArgumentParser()
@@ -83,7 +83,7 @@ if is_main_process:
     # NOTE: config may be overridden by sweep agent; defaults work for normal runs
     wandb.init(
         project="hpml-final",
-        name="food101-modular-nn-validate-scaling",
+        name="food101-modular-nn",
         config={
             "model_name": "Modular-CVNN",
             "gpu-type": "RTX 5090",
@@ -91,7 +91,7 @@ if is_main_process:
             "lr": 1e-4,
             "optimizer": "Adam",
             "num_workers": 4,
-            "kernel_size": 5,
+            # "kernel_size": 5,
             "filter_dimension": 5,
             "epochs": 1000,
             "compile": True,
@@ -133,7 +133,7 @@ filter_dimension = cfg["filter_dimension"]
 compile_mode = cfg["compile"]
 batch_size = cfg["batch_size"]
 num_workers = cfg["num_workers"]
-kernel_size = cfg["kernel_size"]
+# kernel_size = cfg["kernel_size"]
 log_interval = cfg["log_interval"]
 save_every = cfg["save_every"]
 checkpoint_path = cfg["checkpoint_path"]
@@ -141,10 +141,17 @@ resume = cfg["resume"]
 
 model_config = cfg["model_config"]
 
-config_string = "".join([model_config[k][0] for k in model_config])
+ORDER = [
+    "conv1", "conv2", "conv3", "conv4", "conv5",
+    "conv6", "conv7", "conv8", "conv9", "conv10",
+    "fc1", "fc2", "final",
+]
+
+config_string = "".join(model_config[k][0] for k in ORDER)
+
 
 if is_main_process:
-    wandb.run.name = f"food101-modular-nn-{config_string}-filter5-allbin-1"
+    wandb.run.name = f"food101-modular-nn-{config_string}-test-1"
 
 
 def save_checkpoint(epoch, model, optimizer, scheduler, scaler, path):
@@ -264,7 +271,6 @@ for epoch in range(start_epoch, epochs+1):
         else:
             loss.backward()
             optimizer.step()
-        scheduler.step()
 
         # accumulate train stats
         total_loss += loss.item()
@@ -277,6 +283,8 @@ for epoch in range(start_epoch, epochs+1):
     train_acc = train_correct / train_total if train_total > 0 else 0.0
 
     train_time = time.perf_counter() - start_time
+
+    scheduler.step()
 
     start_time = time.perf_counter()
 
