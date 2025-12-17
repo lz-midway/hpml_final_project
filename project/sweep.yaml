@@ -1,0 +1,64 @@
+# sweep.yaml
+program: train_cnn.py
+method: grid
+metric:
+  name: test/accuracy
+  goal: maximize
+
+parameters:
+  model_name:
+    value: "Modular-CVNN"
+  gpu-type:
+    value: "RTX 5090"
+  batch_size:
+    value: 64
+  lr:
+    value: 1e-4
+  optimizer:
+    value: Adam
+  num_workers:
+    value: 4
+  filter_dimension:
+    value: 3
+  epochs:
+    value: 50
+  compile:
+    value: true
+  log_interval:
+    value: 10
+  save_every:
+    value: 50
+  checkpoint_path:
+    value: "checkpoint.pt"
+  resume:
+    value: false
+
+  # Sweep over conv/residual blocks
+  model_config:
+    parameters:
+      conv1:
+        values: ["real", "binary"]
+      conv2:
+        values: ["real", "binary"]
+      conv3:
+        values: ["real", "binary"]
+      conv4:
+        values: ["real", "binary"]
+      conv5:
+        values: ["real", "binary"]
+      conv6:
+        values: ["real", "binary"]
+      conv7:
+        values: ["real", "binary"]
+      conv8:
+        values: ["real", "binary"]
+      conv9:
+        values: ["real", "binary"]
+      conv10:
+        values: ["real", "binary"]
+      fc1:
+        value: "binary"
+      fc2:
+        value: "binary"
+      final:
+        value: "binary"

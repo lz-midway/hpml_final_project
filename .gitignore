@@ -209,3 +209,4 @@ __marimo__/
 
 # other stuff
 .DS_Store
+wandb
