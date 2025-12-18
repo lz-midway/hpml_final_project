@@ -37,8 +37,8 @@ logging.basicConfig(
 
 torch.manual_seed(42)
 
-os.environ["WANDB_API_KEY"] = "0f853b7aa9e6bd44416474b253642758cf20704f"
-os.environ["PYTHONWARNINGS"] = "ignore"
+# os.environ["WANDB_API_KEY"] = ""
+# os.environ["PYTHONWARNINGS"] = "ignore"
 
 # -------------------------
 # CLI
@@ -94,14 +94,14 @@ ctx = nullcontext() if amp_dtype is None else torch.amp.autocast(device_type=dev
 model_config = {
     "conv1": "binary",
     "conv2": "binary",
-    "conv3": "binary",
-    "conv4": "binary",
+    "conv3": "real",
+    "conv4": "real",
     "conv5": "binary",
     "conv6": "binary",
-    "conv7": "binary",
-    "conv8": "binary",
-    "conv9": "binary",
-    "conv10": "binary",
+    "conv7": "real",
+    "conv8": "real",
+    "conv9": "real",
+    "conv10": "real",
     "fc1": "binary",
     "fc2": "binary",
     "final": "binary",
@@ -123,7 +123,7 @@ if not is_main_process:
 if is_main_process:
     wandb.init(
         project="hpml-final",
-        name=f"food101-prune-ft-{config_string}",
+        name=f"food101-prune-ft-{config_string}-{args.prune_amount}-fd{args.filter_dimension}",
         config={
             "model_name": "Modular-CVNN",
             "gpu-type": "RTX 5090",
@@ -162,6 +162,7 @@ lr = cfg.get("lr", args.lr)
 filter_dimension = cfg.get("filter_dimension", args.filter_dimension)
 num_classes = cfg.get("num_classes", args.num_classes) if "num_classes" in cfg else args.num_classes
 compile_mode = cfg.get("compile", args.compile)
+
 
 # -------------------------
 # Build model and load checkpoint
@@ -224,12 +225,6 @@ if is_main_process:
     logging.info(f"Sparsity report: {sparsity}")
     wandb.log({"global_sparsity": sparsity["_global"]["global_sparsity"]})
 
-# Optionally compile the model (do this before wrapping in DDP)
-if compile_mode:
-    if is_main_process:
-        print("Compiling model via torch.compile() ...")
-    model = torch.compile(model)
-
 # Wrap in DDP if needed
 if use_ddp:
     model = DDP(
@@ -238,6 +233,7 @@ if use_ddp:
         output_device=args.local_rank,
         find_unused_parameters=False
     )
+
 
 # -------------------------
 # Optimizer, criterion, scheduler
@@ -335,7 +331,6 @@ for epoch in range(1, finetune_epochs + 1):
             "epoch": epoch,
             "training_time": train_time,
             "validation_time": valid_time,
-            "global_sparsity": sparsity["_global"]["global_sparsity"],
         }, step=epoch)
 
 # final sparsity report & checkpoint save
