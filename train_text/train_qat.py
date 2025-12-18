@@ -4,7 +4,7 @@ Uses pure nn.Linear architecture for comparing standard quantization vs binary l
 Matches train_text.py hyperparameters exactly.
 Usage: torchrun --nproc_per_node=N train_qat.py --bits 8
 """
-import os, time, math, argparse, logging
+import os, time, math, argparse, logging, sys
 import torch
 import torch.nn as nn
 import torch.distributed as dist
@@ -16,14 +16,13 @@ from contextlib import nullcontext
 from data import text_dataset
 from qat import prepare_qat, convert_to_int
 
-# Optional fp8 support
-try:
-    from transformer_engine.pytorch import fp8_autocast
-    HAS_FP8 = True
-except ImportError:
-    HAS_FP8 = False
-    def fp8_autocast():
-        return nullcontext()
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.append(project_root)
+
+
+def fp8_autocast():
+    return nullcontext()
 
 import wandb
 

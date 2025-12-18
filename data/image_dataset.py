@@ -12,7 +12,8 @@ def get_food101_dataloaders(distributed=False,
                             world_size=1,
                             data_root = "./data",
                             batch_size = 64,
-                            num_workers = 4):
+                            num_workers = 4,
+                           prefetch_factor = 4):
     os.makedirs(data_root, exist_ok=True)
 
     tfms_train = transforms.Compose([
@@ -45,9 +46,9 @@ def get_food101_dataloaders(distributed=False,
         test_sampler = None
 
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=(train_sampler is None),
-                              sampler=train_sampler, num_workers=num_workers)
+                              sampler=train_sampler, num_workers=num_workers, prefetch_factor=prefetch_factor, pin_memory=True)
     test_loader  = DataLoader(test_set, batch_size=batch_size, shuffle=False,
-                              sampler=test_sampler, num_workers=num_workers)
+                              sampler=test_sampler, num_workers=num_workers, prefetch_factor=prefetch_factor, pin_memory=True)
 
     return train_loader, test_loader
 

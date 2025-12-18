@@ -2,11 +2,15 @@
 Compare: Full-precision vs PTQ (INT8/INT4) on GPU using bitsandbytes
 Usage: python eval_quantization.py [--quick]
 """
-import os, time, argparse, torch, torch.nn as nn
+import os, sys, time, argparse, torch, torch.nn as nn
 from torch.nn import LayerNorm, functional as F
 from dataclasses import dataclass
 from data import text_dataset
 import bitsandbytes as bnb
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.append(project_root)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--quick", action="store_true")

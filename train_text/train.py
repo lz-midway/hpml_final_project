@@ -1,4 +1,4 @@
-import os
+import os, sys
 import time
 import math
 import torch
@@ -7,8 +7,12 @@ from pathlib import Path
 from pprint import pprint
 from dataclasses import asdict    
 from contextlib import nullcontext
-from transformer_engine.pytorch import fp8_autocast
-import transformer_engine.pytorch as te
+
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.append(project_root)
+
 
 from models import Transformer, TransformerConfig
 from data import text_dataset
@@ -31,7 +35,7 @@ os.environ["PYTHONWARNINGS"] = "ignore"
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--mode", type=str, default="full", choices=["full", "binary", "fp8"])
+parser.add_argument("--mode", type=str, default="full", choices=["full", "binary"])
 parser.add_argument("--n_embd", type=int, default=768)
 parser.add_argument("--local_rank", type=int, default=-1, help="For DDP")
 parser.add_argument("--profile", action="store_true")
@@ -56,8 +60,6 @@ is_main_process = (rank == 0)
 # Select projection layer: either 100% full or 100% binary
 if args.mode == "full":
     proj = nn.Linear
-elif args.mode == "fp8":
-    proj = binary_layers.Linear_fp8
 else:  # binary
     proj = binary_layers.Linear
 
@@ -117,19 +119,19 @@ gradient_accumulation_steps = 3 * 4
 batch_size = 20 
 block_size = 1024
 
-model_config = TransformerConfig(
-    n_layer     = 12,
-    n_head      = 12,
-    n_embd      = args.n_embd,
-    dropout     = 0.0,
-    vocab_size  = 50304,
-    bias        = False,
-    max_len     = block_size,
-    
-    mlp_proj    = proj,  
-    qkv_proj    = proj,
-    c_proj      = nn.Linear,
-)
+    model_config = TransformerConfig(
+        n_layer     = 12,
+        n_head      = 12,
+        n_embd      = args.n_embd,
+        dropout     = 0.0,
+        vocab_size  = 50304,
+        bias        = False,
+        max_len     = block_size,
+        
+        mlp_proj    = proj,  
+        qkv_proj    = proj,
+        c_proj      = nn.Linear,
+    )
 
 model = Transformer(model_config).to(device)
 
@@ -235,10 +237,9 @@ def estimate_loss(model, dataloader, iters=eval_iters):
             break
         idx = idx.to(device)
         labels = labels.to(device)
-        with fp8_autocast():
-            with ctx:
-                logits = model(idx)  # (B, T, vocab)
-                loss = loss_fn(logits, labels)
+        with ctx:
+            logits = model(idx)  # (B, T, vocab)
+            loss = loss_fn(logits, labels)
         losses.append(loss.item())
     model.train()
     return sum(losses) / len(losses)
@@ -355,10 +356,9 @@ while iter_num < max_iters:
                 param_group["lr"] = get_lr(iter_num)
 
         # ---------------- forward ----------------
-        with fp8_autocast():
-            with ctx:
-                logits = model(idx)  # (B, T, vocab)
-                loss = loss_fn(logits, labels) / gradient_accumulation_steps
+        with ctx:
+            logits = model(idx)  # (B, T, vocab)
+            loss = loss_fn(logits, labels) / gradient_accumulation_steps
 
         # ---------------- backward ----------------
         scaler.scale(loss).backward()
@@ -403,7 +403,7 @@ while iter_num < max_iters:
                 
                 wandb.log({"val_loss": val_loss, "iter": iter_num})
                 logging.info(f"{iter_num} val_loss {val_loss:.4f}")   
-                
+                    
                 torch.cuda.synchronize()
                 gen_model = model.module if hasattr(model, "module") else model
                 with torch.no_grad():

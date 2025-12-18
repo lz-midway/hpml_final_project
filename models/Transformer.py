@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from torch.nn import LayerNorm
 from torch.nn import functional as F
-import transformer_engine.pytorch as te
 import math
 
 from dataclasses import dataclass
@@ -106,36 +105,11 @@ class Transformer(nn.Module):
         self.pos_embd = nn.Embedding(config.max_len, config.n_embd)
         self.tok_embd = nn.Embedding(config.vocab_size, config.n_embd)
 
-        def clone_config(cfg):
-            return TransformerConfig(
-                n_embd     = cfg.n_embd,
-                n_head     = cfg.n_head,
-                n_layer    = 1,
-                vocab_size = cfg.vocab_size,
-                dropout    = cfg.dropout,
-                max_len    = cfg.max_len,
-                bias       = cfg.bias,
-                mlp_proj   = cfg.mlp_proj,
-                qkv_proj   = cfg.qkv_proj,
-                c_proj     = cfg.c_proj,
-            )
 
         self.blocks = nn.ModuleList()
 
         for layer_idx in range(config.n_layer):
-
-            layer_cfg = clone_config(config)
-
-            if layer_idx < 12:
-                layer_cfg.mlp_proj = binary_layers.Linear
-                layer_cfg.qkv_proj = binary_layers.Linear
-                layer_cfg.c_proj   = nn.Linear
-            else:
-                layer_cfg.mlp_proj = binary_layers.Linear
-                layer_cfg.qkv_proj = binary_layers.Linear
-                layer_cfg.c_proj   = binary_layers.Linear
-
-            self.blocks.append(Block(layer_cfg))
+            self.blocks.append(Block(config))
 
         self.head = nn.Linear(config.n_embd, config.vocab_size, bias=config.bias)
         self.head.weight = self.tok_embd.weight
@@ -154,10 +128,6 @@ class Transformer(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
-        if isinstance(module, te.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
             
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)   
@@ -165,7 +135,7 @@ class Transformer(nn.Module):
     def update_cache(self):
         self.apply(self._update_cache)
     def _update_cache(self, module):
-        if isinstance(module, (binary_layers.Linear, binary_layers.Linear_fp8)):
+        if isinstance(module, binary_layers.Linear):
             module.update_cache()
 
     def forward(self, idx):

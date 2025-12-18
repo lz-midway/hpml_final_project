@@ -19,7 +19,7 @@ def train_ddp():
     subprocess.run([
         "torchrun",
         "--nproc_per_node=2",
-        "train_cnn.py"
+        "train.py"
     ])
 
 wandb.agent(sweep_id, function=train_ddp)

@@ -1,13 +1,9 @@
 import time
 import torch
 import torch.nn as nn
-import transformer_engine.pytorch as te
 import torch.nn.functional as F
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# Custom Linear that binarises its weights and applies per-example norm
-# ────────────────────────────────────────────────────────────────────────────
 
 class Linear(torch.nn.Module):
     """
@@ -23,15 +19,14 @@ class Linear(torch.nn.Module):
                  out_features: int,
                  bias: bool = True,
                  activation: str | None = None,
-                 eps: float = 1e-5,
-                 scale_init: float = 0.25):
+                 eps: float = 1e-5):
         super().__init__()
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         self.bias = nn.Parameter(torch.zeros(out_features)) if bias else None
         self.reset_parameters()
         self.eps = eps
 
-        self.scale = nn.Parameter(torch.tensor(scale_init, dtype=torch.float32))
+        self.scale = 1/4
         
         self.register_buffer('_w_cache', None, persistent=False)
         self.register_buffer('_w_bin', None, persistent=False)
@@ -89,60 +84,3 @@ class Linear(torch.nn.Module):
 
 
         
-
-
-class Linear_fp8(torch.nn.Module):
-    def __init__(self, in_features, out_features, bias=True, eps=1e-5):
-        super().__init__()
-        
-        self.core = te.Linear(in_features, out_features, bias=bias)
-        tmp = te.Linear(in_features, out_features, bias=bias).eval()
-        self.scale = nn.Parameter(torch.tensor(1.0))
-        self.eps = eps
-        
-        object.__setattr__(self, "_binary_layer", tmp)
-
-        # Ensure the binary layer is not saved
-        self._binary_layer.weight.requires_grad = False
-        if bias:
-            self._binary_layer.bias.requires_grad = False
-
-        # Caches for binarized parameters
-        self.register_buffer("_w_bin", None, persistent=False)
-        self.register_buffer("_b_bin", None, persistent=False)
-        self.update_cache()
-
-    @staticmethod
-    def _binarise(t: torch.Tensor) -> torch.Tensor:
-        return (t > t.mean()).float()
-
-    def to(self, *args, **kwargs):
-        super().to(*args, **kwargs)
-        self._binary_layer.to(*args, **kwargs)
-        return self
-
-    def update_cache(self):
-        self._w_bin = self._binarise(self.core.weight.detach())
-        self._b_bin = (
-            None if self.core.bias is None
-            else self._binarise(self.core.bias.detach())
-        )
-
-        self._binary_layer.weight.data = self._w_bin
-        if self._binary_layer.bias is not None and self._b_bin is not None:
-            self._binary_layer.bias.data = self._b_bin
-
-    def forward(self, x):
-        
-        if self.training:
-            normal_output = self.core(x)
-            binary_output = self._binary_layer(x)
-            z = normal_output + (binary_output - normal_output).detach()
-        else:
-            z = self._binary_layer(x)
-
-        mean = z.mean(dim=-1, keepdim=True)
-        std = z.std(dim=-1, keepdim=True, unbiased=False)
-        z = (z - mean) / (std + self.eps) 
-
-        return z * self.scale
