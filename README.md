@@ -30,13 +30,13 @@ Repository for the HPML final project
    To launch a standard training run using 2 GPUs:
 
    ```bash
-   torchrun --nproc_per_node=2 train_cnn.py
+   torchrun --nproc_per_node=2 train_cnn/train.py
    ```
 
    To run the same job in the background and redirect logs to a file:
 
    ```bash
-   nohup torchrun --nproc_per_node=2 train_cnn.py > out.log 2>&1 &
+   nohup torchrun --nproc_per_node=2 train_cnn/train.py > out.log 2>&1 &
    ```
 
 4. **Run hyperparameter sweeps**
@@ -44,18 +44,18 @@ Repository for the HPML final project
    To start a wandb sweep agent:
 
    ```bash
-   python3 sweep.py
+   python3 train_cnn/sweep.py
    ```
 
    To run the sweep agent in the background:
 
    ```bash
-   nohup python3 sweep.py </dev/null > agent.log 2>&1 &
+   nohup python3 train_cnn/sweep.py </dev/null > agent.log 2>&1 &
    ```
 
 5. **Resuming from a previous checkpoint**
 
-   To resume training from a saved checkpoint, edit the wandb configuration in `train_cnn.py` and set the `resume` flag to `True`. Ensure that `checkpoint_path` points to the correct checkpoint file:
+   To resume training from a saved checkpoint, edit the wandb configuration in `train_cnn/train.py` and set the `resume` flag to `True`. Ensure that `checkpoint_path` points to the correct checkpoint file:
 
    ```python
    if is_main_process:
@@ -107,7 +107,7 @@ This section describes how to configure and control the CNN experiments, both fo
 
 ---
 
-#### Single-run configuration (`train_cnn.py`)
+#### Single-run configuration (`train_cnn/train.py`)
 
 For a standard (non-sweep) run, experiment parameters are defined in the `config` dictionary passed to `wandb.init()`. Make sure to adjust project name (not name, which is set later) as needed:
 
@@ -229,7 +229,7 @@ The `project` name should be updated as needed to match your wandb workspace.
 
 #### Run naming and identification
 
-Within `train_cnn.py`, each run’s name is programmatically adjusted:
+Within `train_cnn/train.py`, each run’s name is programmatically adjusted:
 
 ```python
 wandb.run.name = f"food101-modular-nn-{config_string}-test-1"
