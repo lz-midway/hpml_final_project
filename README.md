@@ -58,44 +58,37 @@ Repository for the HPML final project
    To resume training from a saved checkpoint, edit the wandb configuration in `train_cnn/train.py` and set the `resume` flag to `True`. Ensure that `checkpoint_path` points to the correct checkpoint file:
 
    ```python
-   if is_main_process:
-       wandb.init(
-           project="hpml-final",
-           name="food101-modular-nn",
-           config={
-               "model_name": "Modular-CVNN",
-               "gpu-type": "RTX 5090",
-               "batch_size": 64,
-               "lr": 1e-4,
-               "optimizer": "Adam",
-               "num_workers": 4,
-               "filter_dimension": 5,
-               "epochs": 1000,
-               "compile": True,
-               "log_interval": 10,
-               "save_every": 50,
-               "checkpoint_path": "checkpoint.pt",
-               "resume": True,
-               "model_config": {
-                   "conv1": "binary",
-                   "conv2": "binary",
-                   "conv3": "binary",
-                   "conv4": "binary",
-                   "conv5": "binary",
-                   "conv6": "binary",
-                   "conv7": "binary",
-                   "conv8": "binary",
-                   "conv9": "binary",
-                   "conv10": "binary",
-                   "fc1": "binary",
-                   "fc2": "binary",
-                   "final": "binary"
-               },
-               "device": str(device)
-           }
-       )
-   else:
-       wandb.init(mode="disabled")
+   # canonical default model_config (kept as a dict so nesting is preserved)
+    DEFAULT_MODEL_CONFIG = {
+        "conv1": "binary", "conv2": "binary",
+        "conv3": "real", "conv4": "real",
+        "conv5": "real", "conv6": "real",
+        "conv7": "real", "conv8": "real",
+        "conv9": "real", "conv10": "real",
+        "fc1": "binary", "fc2": "binary", "final": "binary"
+    }
+
+    # top-level defaults for wandb.init (these are the defaults — sweep can override top-level keys)
+    default_config = {
+        "model_name": "Modular-CVNN",
+        "gpu-type": "RTX 5090",
+        "batch_size": 64,
+        "lr": 1e-4,
+        "optimizer": "Adam",
+        "num_workers": 12,
+        "filter_dimension": 5,
+        "epochs": 8,
+        "compile": True,
+        "log_interval": 10,
+        "save_every": 4,
+        "checkpoint_path": "checkpoint.pt",
+        "resume": True,
+        "prefetch_factor": 4,
+        # put the default nested model_config here (sweeps may replace it entirely or partially)
+        "model_config": DEFAULT_MODEL_CONFIG,
+        "device": str(device)
+    }
+
    ```
 
    **Note:**
