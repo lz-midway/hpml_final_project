@@ -1,169 +1,97 @@
-# hpml_final_project
-Repository for the HPML final project
+# HPML Project: 1-Bit Model Parameter Reproduction
 
-
-## Steps to run the project:
-(Create and install required environment)
-
-
-### Steps to run the CNN section
-
-1. **Navigate to the project directory**
-
-   Move into the root folder of the project:
-
-   ```bash
-   cd hpml_final_project
-   ```
-
-2. **Set required environment variables**
-
-   Before running any training, configure your Weights & Biases (wandb) API key and suppress Python warnings. Replace the API key with your own.
-
-   ```bash
-   export WANDB_API_KEY="YOUR_WANDB_API_KEY"
-   export PYTHONWARNINGS="ignore"
-   ```
-
-3. **Run a single CNN training job (multi-GPU)**
-
-   To launch a standard training run using 2 GPUs:
-
-   ```bash
-   torchrun --nproc_per_node=2 train_cnn/train.py
-   ```
-
-   To run the same job in the background and redirect logs to a file:
-
-   ```bash
-   nohup torchrun --nproc_per_node=2 train_cnn/train.py > out.log 2>&1 &
-   ```
-
-4. **Run hyperparameter sweeps**
-
-   To start a wandb sweep agent:
-
-   ```bash
-   python3 train_cnn/sweep.py
-   ```
-
-   To run the sweep agent in the background:
-
-   ```bash
-   nohup python3 train_cnn/sweep.py </dev/null > agent.log 2>&1 &
-   ```
-
-5. **Resuming from a previous checkpoint**
-
-   To resume training from a saved checkpoint, edit the wandb configuration in `train_cnn/train.py` and set the `resume` flag to `True`. Ensure that `checkpoint_path` points to the correct checkpoint file:
-
-   ```python
-   if is_main_process:
-       wandb.init(
-           project="hpml-final",
-           name="food101-modular-nn",
-           config={
-               "model_name": "Modular-CVNN",
-               "gpu-type": "RTX 5090",
-               "batch_size": 64,
-               "lr": 1e-4,
-               "optimizer": "Adam",
-               "num_workers": 4,
-               "filter_dimension": 5,
-               "epochs": 1000,
-               "compile": True,
-               "log_interval": 10,
-               "save_every": 50,
-               "checkpoint_path": "checkpoint.pt",
-               "resume": True,
-               "model_config": {
-                   "conv1": "binary",
-                   "conv2": "binary",
-                   "conv3": "binary",
-                   "conv4": "binary",
-                   "conv5": "binary",
-                   "conv6": "binary",
-                   "conv7": "binary",
-                   "conv8": "binary",
-                   "conv9": "binary",
-                   "conv10": "binary",
-                   "fc1": "binary",
-                   "fc2": "binary",
-                   "final": "binary"
-               },
-               "device": str(device)
-           }
-       )
-   else:
-       wandb.init(mode="disabled")
-   ```
-
-   **Note:**
-   The epoch stored in a checkpoint reflects the number of epochs already completed. If a checkpoint was saved at epoch 400 or 600 and the target is 1000 total epochs, the `epochs` parameter should remain set to `1000`; training will resume automatically from the appropriate epoch.
-
-### CNN configuration
-
-This section describes how to configure and control the CNN experiments, both for single runs and for hyperparameter sweeps. Configuration is handled through a `wandb.init()` call in `train_cnn.py` for standard runs, and through `sweep.yaml` for automated sweeps.
+## Team Information
+- **Team Name**: 1-Bit Reproducers
+- **Members**:
+  - Nghi Dao (nmd2167)
+  - Shangchen Cai (sc5386)
+  - Lance Chou (lz2837)
+  - Qinghui Zeng (qz2548)
 
 ---
 
-#### Single-run configuration (`train_cnn/train.py`)
+## 1. Problem Statement
+Deep neural networks have achieved remarkable progress but come with high computational and memory costs, limiting deployment on resource-constrained devices. This project reproduces and improves upon the paper **"1 Bit Is All We Need: Binary Normalized Neural Networks"** (Cabral et al.).
 
-For a standard (non-sweep) run, experiment parameters are defined in the `config` dictionary passed to `wandb.init()`. Make sure to adjust project name (not name, which is set later) as needed:
+Our goal is to implement and evaluate **Binary Normalized Neural Networks (BNNNs)**, where weights and biases are quantized to 1-bit. We aim to verify if these models can maintain competitive performance compared to full-precision (32-bit) counterparts while significantly reducing memory footprint. We also introduce a **learnable scaling parameter** ($\alpha$) to the normalization layer to improve stability and performance in deeper networks.
 
-```python
-wandb.init(
-    project="hpml-final",
-    name="food101-modular-nn",
-    config={ ... }
-)
+---
+
+## 2. Model Description
+We implemented binary variants of two distinct architectures using **PyTorch**.
+
+### Core Mechanism: Binary Normalized Layers
+We implemented custom layers (`BinaryLinear` and `BinaryConv2d`) located in `binary_layers/`.
+- **Forward Pass:** Weights $W$ and biases $b$ are binarized based on their mean:
+  $$ \text{Quant}(v) = \mathbb{I}(v > \text{mean}(v)) $$
+- **Normalization:** To address distribution shifts (where output distribution tends toward $\mathcal{N}(0, n)$ for $n$ layers), we added a learnable scale parameter $\alpha$:
+  $$ z = \frac{z - \text{mean}(z)}{\text{std}(z) + \epsilon} \times \alpha $$
+- **Backward Pass:** Gradients are computed on the full-precision weights (Straight-Through Estimator concept).
+
+### Architectures
+1.  **CNN (Food-101 Classification):**
+    - **Structure:** 5 Convolutional blocks (2 layers each) followed by 2 Fully Connected layers.
+    - **Channel Sizes:** 32, 64, 64, 128, 256.
+    - **Customization:** Standard `Conv2d` and `Linear` layers are replaced with our custom binary layers.
+
+2.  **Transformer (Language Modeling):**
+    - **Structure:** GPT-2 architecture (124M parameters).
+    - **Specs:** Embedding dim 768, 12 heads, 12 layers.
+    - **Customization:** We explored hybrid quantization, replacing MLP and QKV projections with binary layers while keeping embeddings and LayerNorm in full precision.
+
+---
+
+## 3. Final Results Summary
+
+| Metric | CNN (Mixed Binary) | LLM (6 Binary Layers) |
+|----------------------|-------------|-----------------------|
+| **Test Accuracy / Val Loss** | **~73.6%** (Acc) | **3.348** (Val Loss) |
+| **Baseline Metric** | 74.0% (Full Precision) | 3.300 (Full Precision) |
+| **Model Size Reduction** | Up to ~32x (Theoretical) | ~50% (Hybrid config) |
+| **Training Device** | Multi-GPU (DDP) | Multi-GPU (DDP) |
+| **Dataset** | Food-101 | C4 |
+
+*Note: The CNN maintains stability up to ~70% binary parameter ratio. The LLM showed that a hybrid approach (6 binary layers) offers the best trade-off, while a fully binary 12-layer transformer failed to converge.*
+
+---
+
+## 4. Reproducibility Instructions
+
+### A. Requirements
+Ensure you have Python 3.8+ and PyTorch, and datasets installed.
+
+### B. Wandb Dashboard
+View our training runs, sweeps, and evaluation metrics here:
+https://wandb.ai/chadcai2023-columbia-university/1bit-llm-c4/table?nw=nwuserchadcai2023
+https://wandb.ai/lz2837-columbia-university/hpml-final?nw=nwuserlz2837
+
+### C. Wandb Dashboard
+To train the models, execute the scripts from the root directory to ensure module imports resolve correctly. 
+
+## Training the CNN:
+```bash
+python -m train_cnn/train.py [options]
+
+#For distributed training:
+torchrun train_cnn/train.py --nproc_per_node=2 [options]
 ```
 
-The key configuration fields are:
-
-* **`model_name`**
-  A descriptive name for the model architecture. This value is used for logging and experiment tracking only and does not affect model behavior.
-
-* **`gpu-type`**
-  Records the GPU model used for training. This parameter is informational and intended for experiment bookkeeping.
-
-* **`batch_size`**
-  Number of training samples processed per iteration on each process.
-
-* **`lr`**
-  Learning rate used by the optimizer.
-
-* **`optimizer`**
-  Optimization algorithm. Currently set to Adam.
-
-* **`num_workers`**
-  Number of worker processes used by the PyTorch `DataLoader` for dataset loading and preprocessing. Increasing this can improve input pipeline throughput.
-
-* **`filter_dimension`**
-  Controls the spatial size of convolutional filters. This parameter replaces `kernel_size`, which is unused and therefore commented out in the code.
-
-* **`epochs`**
-  Total number of training epochs. When resuming from a checkpoint, this value still refers to the *final target epoch*, not the remaining number of epochs.
-
-* **`compile`**
-  Boolean flag indicating whether to enable `torch.compile()` for model compilation and potential performance improvements.
-
-* **`log_interval`**
-  Interval (in epochs) at which training and evaluation statistics are printed via the logging system.
-
-* **`save_every`**
-  Interval (in epochs) at which model checkpoints are saved locally.
-
-* **`checkpoint_path`**
-  File path where model checkpoints are written and from which they are loaded when resuming.
-
-* **`resume`**
-  Boolean flag indicating whether training should resume from an existing checkpoint. When set to `True`, `checkpoint_path` must point to a valid checkpoint file.
-
-* **`device`**
-  The compute device used for training (e.g., CUDA device). This value is set programmatically.
-
----
+| Argument | Type | Default | Choices | Description |
+|--------|------|---------|---------|-------------|
+| `model_name` | `str` | — | — | Descriptive name for the model architecture. Used only for logging and experiment tracking; does not affect model behavior. |
+| `gpu_type` | `str` | — | — | Records the GPU model used for training. Informational only, for experiment bookkeeping. |
+| `batch_size` | `int` | — | — | Number of training samples processed per iteration on each process. |
+| `lr` | `float` | — | — | Learning rate used by the optimizer. |
+| `optimizer` | `str` | `"Adam"` | — | Optimization algorithm used for training. |
+| `num_workers` | `int` | — | — | Number of worker processes used by the PyTorch DataLoader for data loading and preprocessing. |
+| `filter_dimension` | `int` | — | — | Controls the spatial size of convolutional filters. Replaces `kernel_size`, which is unused. |
+| `epochs` | `int` | — | — | Total number of training epochs. When resuming, this refers to the final target epoch, not remaining epochs. |
+| `compile` | flag | `False` | — | Enable `torch.compile()` for model compilation and potential performance improvements. |
+| `log_interval` | `int` | — | — | Interval (in epochs) at which training and evaluation statistics are logged. |
+| `save_every` | `int` | — | — | Interval (in epochs) at which model checkpoints are saved locally. |
+| `checkpoint_path` | `str` | — | — | File path used to save checkpoints and to load from when resuming training. |
+| `resume` | flag | `False` | — | Resume training from an existing checkpoint. Requires `checkpoint_path` to point to a valid file. |
+| `device` | `str` | — | — | Compute device used for training (e.g., CUDA device). Set programmatically. |
 
 #### Layer-wise model configuration (`model_config`)
 
@@ -178,76 +106,43 @@ The `model_config` field defines the type of each layer in the CNN:
 ```
 
 Each entry corresponds to a specific layer in the network:
-
 * Convolutional layers: `conv1` through `conv10`
 * Fully connected layers: `fc1`, `fc2`
 * Output layer: `final`
 
 Each layer can be set to:
-
 * **`"binary"`**: uses the proposed binary-normalized layer with binarized parameters.
 * **`"real"`**: uses a standard 32-bit floating-point layer.
 
 By modifying these values, the network can be partially or fully binarized without changing the overall architecture.
 
----
+## Training the LLM:
+```bash
+python -m train_text/train.py [options]
 
-#### Sweep configuration (`sweep.yaml`)
-
-Hyperparameter sweeps are defined in `sweep.yaml`. The sweep configuration largely mirrors the single-run configuration, with some important differences:
-
-* Parameters must be specified using either:
-
-  * **`value`** for fixed parameters, or
-  * **`values`** for parameters being swept over.
-
-Example:
-
-```yaml
-batch_size:
-  value: 64
-
-conv1:
-  values: ["real", "binary"]
+#For distributed training:
+torchrun train_text/train.py --nproc_per_node=2 [options]
 ```
+| Argument | Type | Default | Choices | Description |
+|--------|------|---------|---------|-------------|
+| \`--qkv_proj\` | \`str\` | \`"fp"\` | \`fp\`, \`bin\` | Projection type for QKV layers (\`fp\` = floating point, \`bin\` = binary). |
+| \`--mlp_proj\` | \`str\` | \`"fp"\` | \`fp\`, \`bin\` | Projection type for MLP layers. |
+| \`--c_proj\` | \`str\` | \`"fp"\` | \`fp\`, \`bin\` | Projection type for output (\`c_proj\`) layers. |
+| \`--n_embd\` | \`int\` | \`768\` | — | Embedding dimension size. |
+| \`--n_binary\` | \`int\` | \`0\` | — | Number of binary layers (0 disables binary layers). |
+| \`--local_rank\` | \`int\` | \`-1\` | — | Local rank for Distributed Data Parallel (DDP) training. |
+| \`--profile\` | flag | \`False\` | — | Enable profiling mode when set. |
+| \`--resume_run\` | \`str\` | \`None\` | — | Weights & Biases run ID to resume, or \`"auto"\` to resume the latest run. |
 
-In the sweep setup:
 
-* Most training parameters (`batch_size`, `lr`, `epochs`, etc.) are fixed using `value`.
-* The `model_config` section uses `values` to sweep over `"real"` and `"binary"` options for selected layers.
-* Fully connected and final layers are fixed to `"binary"`.
+*Note: For the LLM pruning experiments, refer to train_text/pruning.ipynb.*
 
-The sweep is launched programmatically in `sweep.py`:
+### D. Evaluation
+All evaluation results are saved in WandB during training.
 
-```python
-sweep_id = wandb.sweep(sweep_config, project="hpml-final")
+
+E. Quickstart: Minimum Reproducible Result
+```bash
+python -m train_cnn/train.py
+python -m train_text/train.py --n_binary=6
 ```
-
-The `project` name should be updated as needed to match your wandb workspace.
-
----
-
-#### Run naming and identification
-
-Within `train_cnn/train.py`, each run’s name is programmatically adjusted:
-
-```python
-wandb.run.name = f"food101-modular-nn-{config_string}-test-1"
-```
-
-Here:
-
-* `config_string` is automatically constructed from `model_config` by encoding each layer in order:
-
-  * `r` for real-valued layers
-  * `b` for binary layers
-* The order of letters reflects the layer order in the network.
-
-Note that earlier runs may not strictly follow a consistent ordering, as explicit enforcement of layer order was added only after most experiments had already been conducted.
-
----
-
-#### Notes on overrides
-
-When running sweeps, parameters defined by the sweep agent override the defaults specified in `train_cnn.py`. The default configuration is therefore suitable for single runs, while `sweep.yaml` should be treated as the authoritative source during sweep execution.
-
