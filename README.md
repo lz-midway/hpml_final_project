@@ -149,6 +149,6 @@ All evaluation results are saved in WandB during training.
 
 ### E. Quickstart: Minimum Reproducible Result
 ```bash
-python -m train_cnn/train.py
+torchrun train_cnn/train.py --local_rank 0
 python -m train_text/train.py --n_binary=6
 ```
