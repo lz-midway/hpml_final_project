@@ -76,11 +76,10 @@ To train the models, execute the scripts from the root directory to ensure modul
 
 ## Training the CNN:
 ```bash
-python -m train_cnn/train.py [options]
-
-#For distributed training:
-torchrun train_cnn/train.py --nproc_per_node=2 [options]
+python -m train_cnn/sweep.py
 ```
+
+Inside train_cnn/sweep.yaml, these are the following configuration:
 
 | Argument | Type | Default | Choices | Description |
 |--------|------|---------|---------|-------------|
@@ -100,7 +99,7 @@ torchrun train_cnn/train.py --nproc_per_node=2 [options]
 | `device` | `str` | — | — | Compute device used for training (e.g., CUDA device). Set programmatically. |
 
 #### Layer-wise model configuration (`model_config`)
-
+ 
 The `model_config` field defines the type of each layer in the CNN:
 
 ```python
@@ -149,6 +148,6 @@ All evaluation results are saved in WandB during training.
 
 ### E. Quickstart: Minimum Reproducible Result
 ```bash
-python -m train_cnn/train.py
+torchrun train_cnn/train.py --local_rank 0
 python -m train_text/train.py --n_binary=6
 ```
