@@ -131,14 +131,14 @@ torchrun train_text/train.py --nproc_per_node=2 [options]
 ```
 | Argument | Type | Default | Choices | Description |
 |--------|------|---------|---------|-------------|
-| \`--qkv_proj\` | \`str\` | \`"fp"\` | \`fp\`, \`bin\` | Projection type for QKV layers (\`fp\` = floating point, \`bin\` = binary). |
-| \`--mlp_proj\` | \`str\` | \`"fp"\` | \`fp\`, \`bin\` | Projection type for MLP layers. |
-| \`--c_proj\` | \`str\` | \`"fp"\` | \`fp\`, \`bin\` | Projection type for output (\`c_proj\`) layers. |
-| \`--n_embd\` | \`int\` | \`768\` | — | Embedding dimension size. |
-| \`--n_binary\` | \`int\` | \`0\` | — | Number of binary layers (0 disables binary layers). |
-| \`--local_rank\` | \`int\` | \`-1\` | — | Local rank for Distributed Data Parallel (DDP) training. |
-| \`--profile\` | flag | \`False\` | — | Enable profiling mode when set. |
-| \`--resume_run\` | \`str\` | \`None\` | — | Weights & Biases run ID to resume, or \`"auto"\` to resume the latest run. |
+| `--qkv_proj` | `str` | `"fp"` | `fp`, `bin` | Projection type for QKV layers (`fp` = floating point, `bin` = binary). |
+| `--mlp_proj` | `str` | `"fp"` | `fp`, `bin` | Projection type for MLP layers. |
+| `--c_proj` | `str` | `"fp"` | `fp`, `bin` | Projection type for output (`c_proj`) layers. |
+| `--n_embd` | `int` | `768` | — | Embedding dimension size. |
+| `--n_binary` | `int` | `0` | — | Number of binary layers (0 disables binary layers). |
+| `--local_rank` | `int` | `-1` | — | Local rank for Distributed Data Parallel (DDP) training. |
+| `--profile` | flag | `False` | — | Enable profiling mode when set. |
+| `--resume_run` | `str` | `None` | — | Weights & Biases run ID to resume, or `"auto"` to resume the latest run. |
 
 
 *Note: For the LLM pruning experiments, refer to train_text/pruning.ipynb.*
