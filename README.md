@@ -21,12 +21,16 @@ Our goal is to implement and evaluate **Binary Normalized Neural Networks (BNNNs
 We implemented binary variants of two distinct architectures using **PyTorch**.
 
 ### Core Mechanism: Binary Normalized Layers
+
 We implemented custom layers (`BinaryLinear` and `BinaryConv2d`) located in `binary_layers/`.
-- **Forward Pass:** Weights $W$ and biases $b$ are binarized based on their mean:
-  $$ \text{Quant}(v) = \mathbb{I}(v > \text{mean}(v)) $$
-- **Normalization:** To address distribution shifts (where output distribution tends toward $\mathcal{N}(0, n)$ for $n$ layers), we added a learnable scale parameter $\alpha$:
-  $$ z = \frac{z - \text{mean}(z)}{\text{std}(z) + \epsilon} \times \alpha $$
-- **Backward Pass:** Gradients are computed on the full-precision weights (Straight-Through Estimator concept).
+- **Forward Pass:**  
+  Weights `W` and biases `b` are binarized based on their mean:  
+  `Quant(v) = I(v > mean(v))`
+- **Normalization:**  
+  To address distribution shifts (where the output distribution tends toward `N(0, n)` for `n` layers), we added a learnable scale parameter `α`:  
+  `z = (z - mean(z)) / (std(z) + ε) * α`
+- **Backward Pass:**  
+  Gradients are computed on the full-precision weights.
 
 ### Architectures
 1.  **CNN (Food-101 Classification):**
@@ -62,7 +66,9 @@ Ensure you have Python 3.8+ and PyTorch, and datasets installed.
 
 ### B. Wandb Dashboard
 View our training runs, sweeps, and evaluation metrics here:
+
 https://wandb.ai/chadcai2023-columbia-university/1bit-llm-c4/table?nw=nwuserchadcai2023
+
 https://wandb.ai/lz2837-columbia-university/hpml-final?nw=nwuserlz2837
 
 ### C. Wandb Dashboard
