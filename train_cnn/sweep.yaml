@@ -21,7 +21,7 @@ parameters:
   filter_dimension:
     value: 3
   epochs:
-    value: 10
+    value: 1000
   compile:
     value: true
   log_interval:
