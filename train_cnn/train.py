@@ -96,7 +96,7 @@ default_config = {
     "optimizer": "Adam",
     "num_workers": 12,
     "filter_dimension": 5,
-    "epochs": 4,
+    "epochs": 1000,
     "compile": True,
     "log_interval": 10,
     "save_every": 4,
