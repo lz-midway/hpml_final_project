@@ -51,7 +51,7 @@ We implemented custom layers (`BinaryLinear` and `BinaryConv2d`) located in `bin
 |----------------------|-------------|-----------------------|
 | **Test Accuracy / Val Loss** | **~73.6%** (Acc) | **3.348** (Val Loss) |
 | **Baseline Metric** | 74.0% (Full Precision) | 3.300 (Full Precision) |
-| **Model Size Reduction** | Up to ~70% | ~50%  |
+| **Model Size Reduction** | ~70% | ~50%  |
 | **Training Device** | Multi-GPU (DDP) | Multi-GPU (DDP) |
 | **Dataset** | Food-101 | C4 |
 
