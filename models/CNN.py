@@ -7,7 +7,18 @@ import binary_layers
 
 @dataclass
 class Conv2dConfig:
-    # constructors
+    """
+    Configuration for a single 2D Convolutional Residual Block.
+
+    Attributes:
+        proj_1 (type): Class type for the first convolution (e.g., nn.Conv2d or binary_layers.Conv2d).
+        proj_2 (type): Class type for the second convolution.
+        proj_out (type): Class type for the skip connection projection (if channels change).
+        channels (int): Number of input channels.
+        out_channels (int): Number of output channels.
+        kernel_size (int): Size of the convolution kernel.
+        pool (bool): Whether to apply MaxPooling at the end of the block.
+    """
     proj_1:  type = nn.Conv2d
     proj_2:  type = nn.Conv2d
     proj_out: type = nn.Conv2d
@@ -19,6 +30,14 @@ class Conv2dConfig:
 
 @dataclass
 class ConnectedConfig:
+    """
+    Configuration for a fully connected (linear) layer.
+
+    Attributes:
+        proj (type): Class type for the linear layer (e.g., nn.Linear or binary_layers.Linear).
+        in_dim (int): Input feature dimension.
+        out_dim (int): Output feature dimension.
+    """
     proj:     type = nn.Linear
     in_dim:   int  = 256
     out_dim:  int  = 256
@@ -26,6 +45,13 @@ class ConnectedConfig:
 
 @dataclass
 class CNNConfig:
+    """
+    Master configuration for the entire CNN architecture.
+    
+    Attributes:
+        ConvLayers (list): A list of Conv2dConfig objects defining the feature extraction backbone.
+        ConnectedLayers (list): A list of ConnectedConfig objects defining the classification head.
+    """
     ConvLayers:     list = field(default_factory=lambda: [
         Conv2dConfig(channels=32,  out_channels=64,  kernel_size=3, pool=True),
         Conv2dConfig(channels=64,  out_channels=64,  kernel_size=3, pool=False),
@@ -40,7 +66,13 @@ class CNNConfig:
 
 
 class ResidualBlock(nn.Module):
+    """
+    A generic Residual Block containing two convolution operations, normalization, 
+    activations, and a skip connection.
     
+    Structure:
+        Input -> Conv1 -> BN -> ReLU -> Conv2 -> BN -> ReLU -> (+ Identity) -> Pool -> Output
+    """
     def __init__(self, cfg: Conv2dConfig):
         super().__init__()
         
@@ -84,6 +116,10 @@ class ResidualBlock(nn.Module):
 
 
 class CNN(nn.Module):
+    """
+    The main Convolutional Neural Network class composed of stacked ResidualBlocks 
+    and fully connected layers.
+    """
     def __init__(self,
                  config: CNNConfig = CNNConfig(),  
                  img_channels: int = 3,

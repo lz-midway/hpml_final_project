@@ -5,6 +5,10 @@ from typing import Callable, Optional
 
 
 class Conv2d(nn.Module):
+    """
+    A custom 2D Convolution layer that implements binary quantization 
+    (0 or 1) for weights and biases, coupled with a spatial normalization step.
+    """
     def __init__(self, in_channels, out_channels, kernel_size, padding: str | None = "same",  scale_init: float = 0.25):
         super().__init__()
         self.in_channels = in_channels
