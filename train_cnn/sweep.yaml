@@ -1,8 +1,8 @@
 # sweep.yaml
-program: train_cnn.py
+program: train.py
 method: grid
 metric:
-  name: test/accuracy
+  name: val_accuracy
   goal: maximize
 
 parameters:
@@ -21,7 +21,7 @@ parameters:
   filter_dimension:
     value: 3
   epochs:
-    value: 50
+    value: 10
   compile:
     value: true
   log_interval:
@@ -37,23 +37,23 @@ parameters:
   model_config:
     parameters:
       conv1:
-        values: ["real", "binary"]
+        value: "binary"
       conv2:
-        values: ["real", "binary"]
+        value: "binary"
       conv3:
-        values: ["real", "binary"]
+        value: "binary"
       conv4:
-        values: ["real", "binary"]
+        value: "binary"
       conv5:
-        values: ["real", "binary"]
+        value: "binary"
       conv6:
-        values: ["real", "binary"]
+        value: "binary"
       conv7:
-        values: ["real", "binary"]
+        value: "binary"
       conv8:
-        values: ["real", "binary"]
+        value: "binary"
       conv9:
-        values: ["real", "binary"]
+        value: "binary"
       conv10:
         values: ["real", "binary"]
       fc1:

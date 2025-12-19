@@ -32,7 +32,7 @@ logging.basicConfig(filename="log.txt",
                     datefmt="%m-%d %H:%M")
 
 # WandB key / warnings
-# os.environ["WANDB_API_KEY"] = "YOUR_KEY_HERE" 
+os.environ["WANDB_API_KEY"] = "0f853b7aa9e6bd44416474b253642758cf20704f" 
 os.environ["PYTHONWARNINGS"] = "ignore"
 
 # ------------------------------ CLI args -------------------------------------
@@ -70,40 +70,105 @@ ctx    = nullcontext() if amp_dtype is None else torch.amp.autocast(device_type=
                                                                     dtype=amp_dtype)
 scaler = GradScaler(enabled=use_grad_scaler)
 
-# ------------------------------ WandB config ---------------------------------
-use_wandb = True # Set to True to enable logging
+# ------------------------------ WandB config ------------------------------
+import os
+
+use_wandb = True 
 if not is_main_process:
     os.environ["WANDB_MODE"] = "disabled"
 
-# Default configuration (matches the sweep structure)
-default_config = dict(
-    batch_size       = 64,
-    lr               = 1e-4,
-    epochs           = 1000,
-    num_workers      = 12,
-    prefetch_factor  = 4,
-    compile          = True,
-    filter_dimension = 3,
-    save_every       = 50,
-    checkpoint_path  = "checkpoint.pt",
-    resume           = False,
-    device           = str(device),
-    log_interval     = 10,
-    # Default model config (all binary example)
-    model_config = {
-        "conv1": "real", "conv2": "real",
-        "conv3": "real", "conv4": "real",
-        "conv5": "real", "conv6": "real",
-        "conv7": "real", "conv8": "real",
-        "conv9": "real", "conv10": "real",
-        "fc1": "real", "fc2": "real", "final": "real"
-    }
-)
+# canonical default model_config (kept as a dict so nesting is preserved)
+DEFAULT_MODEL_CONFIG = {
+    "conv1": "binary", "conv2": "binary",
+    "conv3": "real", "conv4": "real",
+    "conv5": "real", "conv6": "real",
+    "conv7": "real", "conv8": "real",
+    "conv9": "real", "conv10": "real",
+    "fc1": "binary", "fc2": "binary", "final": "binary"
+}
 
-wandb.init(project="hpml-final",
-           name="food101-cnn",
-           config=default_config)
-cfg = wandb.config
+# top-level defaults for wandb.init (these are the defaults — sweep can override top-level keys)
+default_config = {
+    "model_name": "Modular-CVNN",
+    "gpu-type": "RTX 5090",
+    "batch_size": 64,
+    "lr": 1e-4,
+    "optimizer": "Adam",
+    "num_workers": 12,
+    "filter_dimension": 5,
+    "epochs": 4,
+    "compile": True,
+    "log_interval": 10,
+    "save_every": 4,
+    "checkpoint_path": "checkpoint.pt",
+    "resume": False,
+    "prefetch_factor": 4,
+    # put the default nested model_config here (sweeps may replace it entirely or partially)
+    "model_config": DEFAULT_MODEL_CONFIG,
+    "device": str(device)
+}
+
+# Initialize wandb on main; other ranks disabled
+if is_main_process:
+    wandb.init(project="hpml-final",
+               name="food101-cnn-refactor_verify",
+               config=default_config)
+else:
+    wandb.init(mode="disabled")
+
+# Grab the runtime config from wandb (this contains sweep overrides if any)
+# then deep-merge the nested model_config with DEFAULT_MODEL_CONFIG so partial sweep overrides work.
+if is_main_process:
+    runtime_cfg = dict(wandb.config)  # snapshot
+else:
+    runtime_cfg = None
+
+# DDP-safe broadcast of the runtime config snapshot
+obj_list = [runtime_cfg]
+dist.broadcast_object_list(obj_list, src=0)
+cfg = obj_list[0]   # now every rank has the same flat dictionary
+
+# Ensure model_config is a merged dict: default values filled in if sweep provided partial dict
+raw_model_config = cfg.get("model_config", {}) or {}
+# If wandb provided a non-dict for model_config (unlikely), coerce to dict safely
+if not isinstance(raw_model_config, dict):
+    raw_model_config = dict(raw_model_config)
+
+# deep-merge: keys from raw_model_config override defaults, missing keys preserved
+merged_model_config = dict(DEFAULT_MODEL_CONFIG)
+merged_model_config.update(raw_model_config)
+
+# write the merged model_config back into the active cfg so later code reads merged values
+cfg["model_config"] = merged_model_config
+
+# build a short config string for run naming
+ORDER = [
+    "conv1", "conv2", "conv3", "conv4", "conv5",
+    "conv6", "conv7", "conv8", "conv9", "conv10",
+    "fc1", "fc2", "final",
+]
+config_string = "".join(cfg["model_config"][k][0] for k in ORDER)
+
+# Detect whether this run is part of a sweep for naming purposes.
+# We check common signals: wandb.run.sweep_id (if available) or env var.
+is_sweep_run = False
+if is_main_process:
+    try:
+        sweep_id = getattr(wandb.run, "sweep_id", None)
+    except Exception:
+        sweep_id = None
+    # common env var set when running a sweep agent
+    sweep_env = os.environ.get("WANDB_SWEEP_ID") or os.environ.get("WANDB_AGENT_ID")
+    is_sweep_run = bool(sweep_id or sweep_env)
+
+    if is_sweep_run:
+        # include sweep id if available to make names unique & traceable
+        suffix = f"sweep-{sweep_id}" if sweep_id else "sweep"
+        wandb.run.name = f"food101-modular-nn-{config_string}-{suffix}"
+    else:
+        wandb.run.name = f"food101-modular-nn-{config_string}-manual"
+
+
 
 # ------------------------- helper: pretty print cfg --------------------------
 def pretty_print_cnn_config(cnn_cfg: CNNConfig):
@@ -133,26 +198,35 @@ def get_layer_cls(name, layer_type="conv"):
         return nn.Conv2d if layer_type == "conv" else nn.Linear
     raise ValueError(f"Unknown layer type: {name}")
 
-mc = cfg.model_config
+mc = cfg["model_config"]
 model_cfg = CNNConfig()
+ORDER = [
+    "conv1", "conv2", "conv3", "conv4", "conv5",
+    "conv6", "conv7", "conv8", "conv9", "conv10",
+    "fc1", "fc2", "final",
+]
+config_string = "".join(mc[k][0] for k in ORDER)
+
+if is_main_process:
+    wandb.run.name = f"food101-modular-nn-{config_string}-verify-1"
 
 # Map the 10 conv layers from config to the 5 Blocks (2 layers per block)
 # Structure matches original BCVNN: 
 # Block 1 (32->64), Block 2 (64->64), Block 3 (64->64), Block 4 (64->128), Block 5 (128->256)
 model_cfg.ConvLayers = [
-    Conv2dConfig(channels=32,  out_channels=64,  kernel_size=3, pool=True, 
+    Conv2dConfig(channels=32,  out_channels=64,  kernel_size=cfg["filter_dimension"], pool=True, 
                  proj_1=get_layer_cls(mc['conv1']), proj_2=get_layer_cls(mc['conv2'])),
     
-    Conv2dConfig(channels=64,  out_channels=64,  kernel_size=3, pool=False, 
+    Conv2dConfig(channels=64,  out_channels=64,  kernel_size=cfg["filter_dimension"], pool=True, 
                  proj_1=get_layer_cls(mc['conv3']), proj_2=get_layer_cls(mc['conv4'])),
     
-    Conv2dConfig(channels=64,  out_channels=64,  kernel_size=3, pool=False, 
+    Conv2dConfig(channels=64,  out_channels=64,  kernel_size=cfg["filter_dimension"], pool=True, 
                  proj_1=get_layer_cls(mc['conv5']), proj_2=get_layer_cls(mc['conv6'])),
     
-    Conv2dConfig(channels=64,  out_channels=128, kernel_size=3, pool=True, 
+    Conv2dConfig(channels=64,  out_channels=128, kernel_size=cfg["filter_dimension"], pool=True, 
                  proj_1=get_layer_cls(mc['conv7']), proj_2=get_layer_cls(mc['conv8'])),
                  
-    Conv2dConfig(channels=128, out_channels=256, kernel_size=3, pool=True, 
+    Conv2dConfig(channels=128, out_channels=256, kernel_size=cfg["filter_dimension"], pool=False, 
                  proj_1=get_layer_cls(mc['conv9']), proj_2=get_layer_cls(mc['conv10'])),
 ]
 
@@ -166,7 +240,7 @@ pretty_print_cnn_config(model_cfg)
 
 model = CNN(config=model_cfg, img_channels=3, num_classes=101).to(device)
 
-if cfg.compile:
+if cfg["compile"]:
     if is_main_process:
         print("Compiling model ...")
     model = torch.compile(model)
@@ -179,7 +253,7 @@ if use_ddp:
 
 # ----------------------- Optimizer / scheduler -------------------------------
 criterion  = nn.CrossEntropyLoss()
-optimizer  = optim.Adam(model.parameters(), lr=cfg.lr)
+optimizer  = optim.Adam(model.parameters(), lr=cfg["lr"])
 
 warmup = LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=20)
 decay  = CosineAnnealingLR(optimizer, T_max=1100)
@@ -187,9 +261,9 @@ scheduler = SequentialLR(optimizer, [warmup, decay], milestones=[20])
 
 # -------------------------- Checkpoint resume --------------------------------
 start_epoch = 1
-if cfg.resume and os.path.exists(cfg.checkpoint_path):
+if cfg["resume"] and os.path.exists(cfg["checkpoint_path"]):
     map_loc = {"cuda:0": f"cuda:{args.local_rank}"} if use_ddp else device
-    ckpt = torch.load(cfg.checkpoint_path, map_location=map_loc)
+    ckpt = torch.load(cfg["checkpoint_path"], map_location=map_loc)
 
     mdl_state = ckpt["model"]
     (model.module if isinstance(model, DDP) else model).load_state_dict(mdl_state)
@@ -205,13 +279,13 @@ train_loader, test_loader = image_dataset.get_food101_dataloaders(
     distributed = use_ddp,
     rank        = rank,
     world_size  = world_size,
-    batch_size  = cfg.batch_size,
-    num_workers = cfg.num_workers,
-    prefetch_factor = cfg.prefetch_factor
+    batch_size  = cfg["batch_size"],
+    num_workers = cfg["num_workers"],
+    prefetch_factor = cfg["prefetch_factor"]
 )
 
 # ---------------------------- Training loop ----------------------------------
-for epoch in range(start_epoch, cfg.epochs + 1):
+for epoch in range(start_epoch, cfg["epochs"] + 1):
     if use_ddp and hasattr(train_loader, "sampler"):
         train_loader.sampler.set_epoch(epoch)
 
@@ -244,7 +318,10 @@ for epoch in range(start_epoch, cfg.epochs + 1):
         correct  += (preds == y).sum().item()
         seen     += y.size(0)
 
-        model.update_cache()
+        if isinstance(model, DDP):
+            model.module.update_cache()
+        else:
+            model.update_cache()
 
     train_loss = loss_sum / len(train_loader)
     train_acc  = correct   / max(1, seen)
@@ -271,7 +348,7 @@ for epoch in range(start_epoch, cfg.epochs + 1):
 
     # ---------------------- Logging ----------------------------------------
     if is_main_process:
-        if epoch % cfg.log_interval == 0:
+        if epoch % cfg["log_interval"] == 0:
             msg = (f"Epoch {epoch:3d} | "
                    f"train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "
                    f"val_loss {val_loss:.4f} | val_acc {val_acc:.4f} | "
@@ -289,8 +366,8 @@ for epoch in range(start_epoch, cfg.epochs + 1):
             val_time        = val_time
         ), step=epoch)
 
-        if epoch % cfg.save_every == 0:
-            state_path = cfg.checkpoint_path
+        if epoch % cfg["save_every"] == 0:
+            state_path = cfg["checkpoint_path"]
             if isinstance(model, DDP):
                 state_dict = model.module.state_dict()
             else:
