@@ -147,7 +147,7 @@ torchrun train_text/train.py --nproc_per_node=2 [options]
 All evaluation results are saved in WandB during training.
 
 
-E. Quickstart: Minimum Reproducible Result
+### E. Quickstart: Minimum Reproducible Result
 ```bash
 python -m train_cnn/train.py
 python -m train_text/train.py --n_binary=6
