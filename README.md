@@ -147,7 +147,7 @@ torchrun train_text/train.py --nproc_per_node=2 [options]
 After training a full precision model, save it as .pt and run:
 ```bash
 python ptq.py --ckpt path/to/full_model.pt
-
+```
 
 ### D. Evaluation
 All evaluation results are saved in WandB during training.
