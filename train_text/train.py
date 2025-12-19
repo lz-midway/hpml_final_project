@@ -29,14 +29,17 @@ from transformers import logging as hf_logging
 hf_logging.set_verbosity_error()
 
 # Wandb Login key
-os.environ["WANDB_API_KEY"] = "d594f859224e08959ccfb537de51d8761c5c289f"
+#os.environ["WANDB_API_KEY"] = ""
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["PYTHONWARNINGS"] = "ignore"
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--mode", type=str, default="full", choices=["full", "binary"])
+parser.add_argument("--qkv_proj", type=str, default="fp", choices=["fp", "bin"])
+parser.add_argument("--mlp_proj", type=str, default="fp", choices=["fp", "bin"])
+parser.add_argument("--c_proj", type=str, default="fp", choices=["fp", "bin"])
 parser.add_argument("--n_embd", type=int, default=768)
+parser.add_argument("--n_binary", type=int, default=0)
 parser.add_argument("--local_rank", type=int, default=-1, help="For DDP")
 parser.add_argument("--profile", action="store_true")
 parser.add_argument("--resume_run", type=str, default=None, help="W&B run id or 'auto' to resume latest run")
@@ -57,11 +60,6 @@ else:
     
 is_main_process = (rank == 0)
 
-# Select projection layer: either 100% full or 100% binary
-if args.mode == "full":
-    proj = nn.Linear
-else:  # binary
-    proj = binary_layers.Linear
 
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
@@ -115,23 +113,24 @@ log_interval = 1
 eval_iters = 200
 always_save_checkpoint = True 
 
-gradient_accumulation_steps = 3 * 4
+gradient_accumulation_steps = 6 * 4 // int(os.environ.get("WORLD_SIZE", 1))
 batch_size = 20 
 block_size = 1024
 
-    model_config = TransformerConfig(
-        n_layer     = 12,
-        n_head      = 12,
-        n_embd      = args.n_embd,
-        dropout     = 0.0,
-        vocab_size  = 50304,
-        bias        = False,
-        max_len     = block_size,
-        
-        mlp_proj    = proj,  
-        qkv_proj    = proj,
-        c_proj      = nn.Linear,
-    )
+model_config = TransformerConfig(
+    n_layer     = 12,
+    n_head      = 12,
+    n_embd      = args.n_embd,
+    dropout     = 0.0,
+    vocab_size  = 50304,
+    bias        = False,
+    max_len     = block_size,
+    
+    mlp_proj    = nn.Linear if args.mlp_proj == "fp" else binary_layers.Linear,
+    qkv_proj    = nn.Linear if args.qkv_proj == "fp" else binary_layers.Linear,
+    c_proj      = nn.Linear if args.c_proj == "fp" else binary_layers.Linear,
+    n_binary    = args.n_binary
+)
 
 model = Transformer(model_config).to(device)
 
@@ -146,7 +145,7 @@ if args.local_rank != -1:
         "device_ids": [args.local_rank],
     }
     # binary/fp8 modes may have params not used every step
-    if args.mode != "full":
+    if args.n_binary > 0:
         ddp_kwargs["find_unused_parameters"] = True
 
     model = DDP(model, **ddp_kwargs)
@@ -197,6 +196,7 @@ run_config = {
         "qkv_proj"  : model_config.qkv_proj,
         "c_proj"    : model_config.c_proj,
         "max_len"   : model_config.max_len,
+        "n_binary"   : model_config.n_binary,
     },
 }
 if is_main_process:
@@ -308,7 +308,7 @@ if is_main_process:
         wandb.init(
             project="1bit-llm-c4",
             id=resume_id,
-            name=f"{args.mode}_embd{args.n_embd}",
+            name=f"{args.n_binary}_embd{args.n_embd}",
             config=vars(args),
             resume="allow",
         )
@@ -316,7 +316,7 @@ if is_main_process:
         # Start a NEW run
         wandb.init(
             project="1bit-llm-c4",
-            name=f"{args.mode}_embd{args.n_embd}",
+            name=f"{args.n_binary}_embd{args.n_embd}",
             config=vars(args)
         )
 

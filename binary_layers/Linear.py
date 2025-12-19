@@ -26,7 +26,7 @@ class Linear(torch.nn.Module):
         self.reset_parameters()
         self.eps = eps
 
-        self.scale = 1/4
+        self.scale = nn.Parameter(torch.tensor(0.25, dtype=torch.float32))
         
         self.register_buffer('_w_cache', None, persistent=False)
         self.register_buffer('_w_bin', None, persistent=False)

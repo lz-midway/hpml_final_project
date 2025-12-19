@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.nn import LayerNorm
 from torch.nn import functional as F
 import math
+import copy
 
 from dataclasses import dataclass
 import binary_layers
@@ -21,6 +22,8 @@ class TransformerConfig:
     mlp_proj: type   = nn.Linear
     qkv_proj: type   = nn.Linear 
     c_proj: type =   nn.Linear
+
+    n_binary: int = 0
     
     def __post_init__(self):
         # Ensures that `n_head` divides `n_embd`
@@ -109,7 +112,14 @@ class Transformer(nn.Module):
         self.blocks = nn.ModuleList()
 
         for layer_idx in range(config.n_layer):
-            self.blocks.append(Block(config))
+            if layer_idx < config.n_binary:
+                config = copy.copy(config)
+                config.mlp_proj = binary_layers.Linear
+                config.qkv_proj = binary_layers.Linear
+                config.c_proj = binary_layers.Linear
+                self.blocks.append(Block(config))
+            else:
+                self.blocks.append(Block(config))
 
         self.head = nn.Linear(config.n_embd, config.vocab_size, bias=config.bias)
         self.head.weight = self.tok_embd.weight
